@@ -13,31 +13,54 @@ import {
 ───────────────────────────────────────────── */
 
 /**
- * Formate un nombre avec séparateurs de milliers (espace insécable)
- * ex: 1000000 → "1 000 000"
+ * Formate un nombre avec séparateurs de milliers en ESPACE
+ * ex: 1000000 → "1 000 000 MRU"
+ * NOTE : on utilise "\u00A0" (espace insécable) pour éviter les
+ *         coupures de ligne dans react-pdf.
  */
 const fmt = (n) => {
   if (n === null || n === undefined || n === "-") return "-";
   const num = Number(n);
   if (isNaN(num)) return "-";
-  return num.toLocaleString("fr-FR"); // ex: 1 000 000
+  // Séparateur d'espace insécable (\u00A0) — jamais de "/"
+  return num.toLocaleString("fr-FR").replace(/\u202F/g, "\u00A0");
 };
 
 /**
- * Nettoie la description :
- * - Supprime le préfixe "Facturation BL: XXXXX | Montant: XXXXXX"  → garde le reste
- * - Supprime aussi "Facturation BL: XXXXX |" sans montant
- * - Si la description ne contient que ça, on retourne la désignation nettoyée
+ * Construit la désignation affichée dans la colonne :
+ *   - Si la description contient un numéro de BL (format "BL: XXXXX |")
+ *     → "Facturation BL: XXXXX"
+ *   - Sinon on nettoie le texte et on l'affiche tel quel
+ *   - Pour les versements / crédits → on laisse la description intacte
  */
-const cleanDescription = (raw = "") => {
-  // Supprime "Facturation BL: [ref] | Montant: [n]" et variantes
-  let cleaned = raw
+const buildDesignation = (raw = "", isCredit = false) => {
+  // Pour les versements, on conserve la description originale (nettoyée)
+  if (isCredit) {
+    return (
+      raw
+        .replace(
+          /Facturation\s+BL\s*:\s*[^\|]+\|\s*Montant\s*:\s*[\d\s]+/gi,
+          "",
+        )
+        .replace(/Facturation\s+BL\s*:\s*[^\|]+\|?/gi, "")
+        .replace(/\|\s*Montant\s*:\s*[\d\s]+/gi, "")
+        .trim() || "Versement"
+    );
+  }
+
+  // Extraction du numéro de BL depuis la description
+  const blMatch = raw.match(/BL\s*:\s*([^\s|,]+)/i);
+  if (blMatch) {
+    return `Facturation BL: ${blMatch[1]}`;
+  }
+
+  // Pas de numéro de BL trouvé dans la description → on nettoie et retourne
+  const cleaned = raw
     .replace(/Facturation\s+BL\s*:\s*[^\|]+\|\s*Montant\s*:\s*[\d\s]+/gi, "")
     .replace(/Facturation\s+BL\s*:\s*[^\|]+\|?/gi, "")
     .replace(/\|\s*Montant\s*:\s*[\d\s]+/gi, "")
     .trim();
 
-  // Si tout a été effacé, on retourne "Facturation" comme libellé minimal
   return cleaned || "Facturation";
 };
 
@@ -205,11 +228,11 @@ const styles = StyleSheet.create({
 /* ─────────────────────────────────────────────
    COMPOSANT PRINCIPAL
    Props :
-     data      — tableau de transactions filtrées
-     client    — objet client
-     period    — { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
+     data         — tableau de transactions filtrées
+     client       — objet client
+     period       — { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
      bilanSummary — { initial, debit, credit, final }
-     blsMap    — Map<numBl, { numDeConteneur, nbrDeConteneur, contenance }>
+     blsMap       — Map<numBl, { numDeConteneur, nbrDeConteneur, contenance }>
 ───────────────────────────────────────────── */
 const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
   <Document>
@@ -269,13 +292,10 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
           const isCredit = t.typeOperation?.toLowerCase().includes("credit");
 
           // Récupération des infos BL depuis blsMap
-          // On cherche le numBl dans la description (format "... BL: XXXXX |...")
-          // OU directement via t.numBl si le champ existe
           let blInfo = null;
           if (t.numBl && blsMap[t.numBl]) {
             blInfo = blsMap[t.numBl];
           } else {
-            // Extraction du numBl depuis la description
             const match = t.description?.match(/BL\s*:\s*([^\s|,]+)/i);
             if (match && blsMap[match[1]]) {
               blInfo = blsMap[match[1]];
@@ -286,6 +306,9 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
           const numCont = blInfo?.numDeConteneur ?? "—";
           const marchand = blInfo?.contenance ?? "—";
 
+          // ── CORRECTION 1 : désignation avec numéro de BL ──
+          const designation = buildDesignation(t.description, isCredit);
+
           return (
             <View
               key={i}
@@ -294,9 +317,12 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
               <Text style={[styles.cellText, styles.colDate]}>
                 {new Date(t.date).toLocaleDateString("fr-FR")}
               </Text>
+
+              {/* ── CORRECTION 1 : affichage "Facturation BL: XXXXX" ── */}
               <Text style={[styles.cellText, styles.colDesc]}>
-                {cleanDescription(t.description)}
+                {designation}
               </Text>
+
               <Text style={[styles.cellText, styles.colNbrCont]}>
                 {nbrCont}
               </Text>
@@ -304,6 +330,8 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
                 {numCont}
               </Text>
               <Text style={[styles.cellText, styles.colMarch]}>{marchand}</Text>
+
+              {/* ── CORRECTION 2 : fmt() utilise des espaces insécables ── */}
               <Text
                 style={[
                   isCredit ? styles.cellMuted : styles.cellDebit,

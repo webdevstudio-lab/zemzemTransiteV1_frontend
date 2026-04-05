@@ -2,15 +2,13 @@ import React, { useState, useMemo, useEffect } from "react";
 import {
   Search,
   PlusCircle,
-  ChevronLeft,
-  ChevronRight,
   Edit2,
   MoreHorizontal,
   Trash2,
   AlertTriangle,
   RefreshCw,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import Modal from "../../components/ui/Modal";
 import API from "../../utils/axiosInstance";
@@ -21,15 +19,19 @@ import UpdateBlForm from "./UpdateBlForm";
 
 const AllBLs = () => {
   const navigate = useNavigate();
+  const location = useLocation();
 
   // --- ÉTATS ---
   const [bls, setBls] = useState([]);
   const [clients, setClients] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("tous");
-  // La pagination a été retirée pour un affichage en liste continue
+  const [searchTerm, setSearchTerm] = useState(
+    () => location.state?.searchTerm ?? "",
+  );
+  const [statusFilter, setStatusFilter] = useState(
+    () => location.state?.statusFilter ?? "tous",
+  );
 
   // --- AUTH / RÔLES ---
   const userDataRaw = localStorage.getItem("_appTransit_user");
@@ -74,6 +76,22 @@ const AllBLs = () => {
     return () => window.removeEventListener("click", handleClickOutside);
   }, []);
 
+  // --- PERSISTANCE DE L'ÉTAT DANS L'HISTORIQUE ---
+  // Met à jour le state de navigation à chaque changement de filtre ou recherche
+  useEffect(() => {
+    navigate(location.pathname, {
+      replace: true,
+      state: { statusFilter, searchTerm },
+    });
+  }, [statusFilter, searchTerm]);
+
+  // --- NAVIGATION VERS UN BL (avec état sauvegardé) ---
+  const handleRowClick = (bl) => {
+    navigate(`/bls/${bl._id}`, {
+      state: { from: location.pathname, statusFilter, searchTerm },
+    });
+  };
+
   // --- ACTIONS ---
   const handleConfirmDelete = async () => {
     if (!selectedBL) return;
@@ -95,6 +113,13 @@ const AllBLs = () => {
     if (isAdmin) tabs.push("Facturé");
     return tabs;
   }, [isAdmin, isSuperviseur]);
+
+  // Sécurité : si l'onglet sauvegardé n'est pas disponible pour ce rôle, revenir à "tous"
+  useEffect(() => {
+    if (availableTabs.length > 0 && !availableTabs.includes(statusFilter)) {
+      setStatusFilter("tous");
+    }
+  }, [availableTabs]);
 
   const filteredBLs = useMemo(() => {
     return bls.filter((bl) => {
@@ -196,9 +221,7 @@ const AllBLs = () => {
               placeholder="Rechercher BL, client..."
               className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-4 focus:ring-red-500/5 outline-none transition-all"
               value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-              }}
+              onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
 
@@ -218,9 +241,7 @@ const AllBLs = () => {
         {availableTabs.map((f) => (
           <button
             key={f}
-            onClick={() => {
-              setStatusFilter(f);
-            }}
+            onClick={() => setStatusFilter(f)}
             className={`pb-4 capitalize whitespace-nowrap transition-all border-b-2 ${
               statusFilter === f
                 ? "border-red-500 text-slate-900"
@@ -253,7 +274,7 @@ const AllBLs = () => {
                 filteredBLs.map((bl) => (
                   <tr
                     key={bl._id}
-                    onClick={() => navigate(`/bls/${bl._id}`)}
+                    onClick={() => handleRowClick(bl)}
                     className="hover:bg-slate-50/50 transition-colors cursor-pointer group"
                   >
                     <td className="px-6 py-5">
@@ -312,7 +333,7 @@ const AllBLs = () => {
                             onClick={(e) => {
                               e.stopPropagation();
                               setActiveMenu(
-                                activeMenu === bl._id ? null : bl._id
+                                activeMenu === bl._id ? null : bl._id,
                               );
                             }}
                             className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
@@ -366,7 +387,7 @@ const AllBLs = () => {
           </table>
         </div>
 
-        {/* FOOTER STATISTIQUE (Remplace le bandeau de pagination) */}
+        {/* FOOTER STATISTIQUE */}
         <div className="px-6 py-4 border-t border-slate-50 bg-slate-50/30">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
             Total : {filteredBLs.length} Dossier(s) affiché(s)
@@ -374,7 +395,7 @@ const AllBLs = () => {
         </div>
       </div>
 
-      {/* MODALS SÉCURISÉS */}
+      {/* MODALS */}
       <Modal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
