@@ -720,7 +720,10 @@ const ClientDetails = () => {
                 <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400">
                   <tr>
                     <th className="px-8 py-4">Flux</th>
-                    <th className="px-8 py-4">Détails</th>
+                    {/* ✅ Type d'opération */}
+                    <th className="px-8 py-4">Type</th>
+                    {/* ✅ Description complète */}
+                    <th className="px-8 py-4">Description</th>
                     <th className="px-8 py-4 text-right">Montant</th>
                   </tr>
                 </thead>
@@ -735,9 +738,14 @@ const ClientDetails = () => {
                         .includes("credit");
                       return (
                         <tr key={t._id} className="hover:bg-slate-50/50">
+                          {/* Flux : icône + date + label */}
                           <td className="px-8 py-5 flex items-center gap-4">
                             <div
-                              className={`p-3 rounded-2xl ${isCredit ? "bg-emerald-50 text-emerald-500" : "bg-red-50 text-red-500"}`}
+                              className={`p-3 rounded-2xl ${
+                                isCredit
+                                  ? "bg-emerald-50 text-emerald-500"
+                                  : "bg-red-50 text-red-500"
+                              }`}
                             >
                               {isCredit ? (
                                 <ArrowDownLeft size={18} />
@@ -750,17 +758,41 @@ const ClientDetails = () => {
                                 {new Date(t.date).toLocaleDateString()}
                               </p>
                               <p
-                                className={`text-[9px] font-bold uppercase ${isCredit ? "text-emerald-400" : "text-red-400"}`}
+                                className={`text-[9px] font-bold uppercase ${
+                                  isCredit ? "text-emerald-400" : "text-red-400"
+                                }`}
                               >
                                 {isCredit ? "Crédit" : "Débit"}
                               </p>
                             </div>
                           </td>
-                          <td className="px-8 py-5 text-xs font-black text-slate-600">
-                            {t.description}
+
+                          {/* ✅ Type : enum lisible (Versement, Facturation, etc.) */}
+                          <td className="px-8 py-5">
+                            <span
+                              className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase ${
+                                isCredit
+                                  ? "bg-emerald-50 text-emerald-600"
+                                  : "bg-red-50 text-red-500"
+                              }`}
+                            >
+                              {t.type || "—"}
+                            </span>
                           </td>
+
+                          {/* ✅ Description : texte libre saisi lors de l'opération */}
+                          <td className="px-8 py-5 text-xs font-bold text-slate-600 italic">
+                            {t.description || (
+                              <span className="text-slate-300 not-italic">
+                                —
+                              </span>
+                            )}
+                          </td>
+
                           <td
-                            className={`px-8 py-5 text-right text-xs font-black ${isCredit ? "text-emerald-500" : "text-red-500"}`}
+                            className={`px-8 py-5 text-right text-xs font-black ${
+                              isCredit ? "text-emerald-500" : "text-red-500"
+                            }`}
                           >
                             {isCredit ? "+" : "-"} {t.montant.toLocaleString()}{" "}
                             MRU

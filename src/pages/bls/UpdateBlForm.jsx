@@ -1,24 +1,47 @@
 import React, { useState } from "react";
 import Select from "react-select";
 import countries from "world-countries";
-import { Package, Hash, Calendar, Globe, User } from "lucide-react";
+import { Package, Hash, Globe, User, Ship } from "lucide-react";
 import API from "../../utils/axiosInstance";
 import { API_PATHS } from "../../utils/apiPaths";
 import toast from "react-hot-toast";
 
+const TRANSPORTEURS = [
+  { value: "MSC", label: "MSC – Mediterranean Shipping Company" },
+  { value: "MAERSK", label: "Maersk Line" },
+  { value: "CMA CGM", label: "CMA CGM" },
+  { value: "COSCO", label: "COSCO Shipping" },
+  { value: "EVERGREEN", label: "Evergreen Marine" },
+  { value: "HAPAG-LLOYD", label: "Hapag-Lloyd" },
+  { value: "ONE", label: "ONE – Ocean Network Express" },
+  { value: "YANG MING", label: "Yang Ming Marine" },
+  { value: "HMM", label: "HMM – Hyundai Merchant Marine" },
+  { value: "PIL", label: "PIL – Pacific International Lines" },
+  { value: "ARKAS", label: "Arkas Line" },
+  { value: "GRIMALDI", label: "Grimaldi Lines" },
+  { value: "DELMAS", label: "Delmas" },
+  { value: "AFRICA EXPRESS", label: "Africa Express Line" },
+  { value: "SAFMARINE", label: "Safmarine" },
+  { value: "MARFRET", label: "Marfret" },
+  { value: "TROPICAL SHIPPING", label: "Tropical Shipping" },
+  { value: "SEABOARD MARINE", label: "Seaboard Marine" },
+  { value: "KING OCEAN", label: "King Ocean Services" },
+  { value: "AUTRE", label: "Autre transporteur" },
+];
+
 const UpdateBlForm = ({ bl, clients, onCancel, onSuccess }) => {
   const [loading, setLoading] = useState(false);
 
-  // Initialisation synchronisée avec CreateBlForm + Données existantes
   const [formData, setFormData] = useState({
     numBl: bl?.numBl || "",
     numDeConteneur: bl?.numDeConteneur || "",
     contenance: bl?.contenance || "",
-    nbrDeConteneur: bl?.nbrDeConteneur || 0, // Ajout du champ manquant
+    nbrDeConteneur: bl?.nbrDeConteneur || 0,
     paysDorigine: bl?.paysDorigine || "",
     typeConteneur: bl?.typeConteneur || "40",
     numDeclaration: bl?.numDeclaration || "",
     id_client: bl?.id_client?._id || bl?.id_client || "",
+    nomTransporteur: bl?.nomTransporteur || "", // ✅ NOUVEAU
   });
 
   const countryOptions = countries.map((c) => ({
@@ -48,7 +71,7 @@ const UpdateBlForm = ({ bl, clients, onCancel, onSuccess }) => {
       await API.patch(url, formData);
 
       toast.success("Dossier mis à jour avec succès");
-      if (onSuccess) onSuccess(); // Déclenchera le fetchData() du parent pour rafraîchir le tableau
+      if (onSuccess) onSuccess();
     } catch (err) {
       const errorMsg =
         err.response?.data?.message || err.message || "Erreur de mise à jour";
@@ -82,8 +105,8 @@ const UpdateBlForm = ({ bl, clients, onCancel, onSuccess }) => {
       backgroundColor: state.isSelected
         ? "#EF233C"
         : state.isFocused
-        ? "#fff1f2"
-        : "transparent",
+          ? "#fff1f2"
+          : "transparent",
       color: state.isSelected ? "white" : "#475569",
       borderRadius: "8px",
       margin: "2px 0",
@@ -104,7 +127,7 @@ const UpdateBlForm = ({ bl, clients, onCancel, onSuccess }) => {
               styles={selectStyle}
               options={clientOptions}
               defaultValue={clientOptions.find(
-                (o) => o.value === formData.id_client
+                (o) => o.value === formData.id_client,
               )}
               onChange={(opt) =>
                 setFormData({ ...formData, id_client: opt ? opt.value : "" })
@@ -144,7 +167,6 @@ const UpdateBlForm = ({ bl, clients, onCancel, onSuccess }) => {
           />
         </div>
 
-        {/* NOUVEAU CHAMP : Nombre de Conteneurs */}
         <div className="space-y-2">
           <label className="text-[11px] font-black uppercase text-slate-400 tracking-widest ml-1">
             Nombre de Conteneurs
@@ -178,7 +200,6 @@ const UpdateBlForm = ({ bl, clients, onCancel, onSuccess }) => {
           </select>
         </div>
 
-        {/* ORIGINE & DATE */}
         <div className="space-y-2">
           <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider flex items-center gap-2">
             <Globe size={14} /> Pays d'Origine
@@ -187,11 +208,33 @@ const UpdateBlForm = ({ bl, clients, onCancel, onSuccess }) => {
             styles={selectStyle}
             options={countryOptions}
             defaultValue={countryOptions.find(
-              (o) => o.value === formData.paysDorigine
+              (o) => o.value === formData.paysDorigine,
             )}
             onChange={(opt) =>
               setFormData({ ...formData, paysDorigine: opt ? opt.value : "" })
             }
+          />
+        </div>
+
+        {/* ✅ NOUVEAU : Transporteur */}
+        <div className="space-y-2">
+          <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider flex items-center gap-2">
+            <Ship size={14} /> Transporteur / Compagnie Maritime
+          </label>
+          <Select
+            styles={selectStyle}
+            options={TRANSPORTEURS}
+            defaultValue={TRANSPORTEURS.find(
+              (o) => o.value === formData.nomTransporteur,
+            )}
+            onChange={(opt) =>
+              setFormData({
+                ...formData,
+                nomTransporteur: opt ? opt.value : "",
+              })
+            }
+            placeholder="Sélectionner le transporteur..."
+            isSearchable
           />
         </div>
 
@@ -225,7 +268,6 @@ const UpdateBlForm = ({ bl, clients, onCancel, onSuccess }) => {
         </div>
       </div>
 
-      {/* BOUTONS D'ACTION (Style harmonisé en Rouge comme Create) */}
       <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 mt-6">
         <button
           type="button"
