@@ -12,29 +12,28 @@ import {
    UTILITAIRES
 ───────────────────────────────────────────── */
 
-/**
- * Formate un nombre avec séparateurs de milliers en ESPACE
- * ex: 1000000 → "1 000 000 MRU"
- * NOTE : on utilise "\u00A0" (espace insécable) pour éviter les
- *         coupures de ligne dans react-pdf.
- */
 const fmt = (n) => {
   if (n === null || n === undefined || n === "-") return "-";
   const num = Number(n);
   if (isNaN(num)) return "-";
-  // Séparateur d'espace insécable (\u00A0) — jamais de "/"
   return num.toLocaleString("fr-FR").replace(/\u202F/g, "\u00A0");
 };
 
 /**
- * Construit la désignation affichée dans la colonne :
- *   - Si la description contient un numéro de BL (format "BL: XXXXX |")
- *     → "Facturation BL: XXXXX"
- *   - Sinon on nettoie le texte et on l'affiche tel quel
- *   - Pour les versements / crédits → on laisse la description intacte
+ * Extrait le numéro VERS-XXXX-XXXXXX depuis une description de transaction.
+ */
+const extractReference = (description = "") => {
+  const match = description.match(/VERS-\d{4}-\d{6}/i);
+  return match ? match[0].toUpperCase() : null;
+};
+
+/**
+ * Construit la désignation principale affichée dans la colonne :
+ *   - Facturation → "Facturation BL: XXXXX"
+ *   - Versement   → "Versement Reçu - Réf: VERS-XXXX-XXXXXX"
+ *   - Autre       → texte nettoyé
  */
 const buildDesignation = (raw = "", isCredit = false) => {
-  // Pour les versements, on conserve la description originale (nettoyée)
   if (isCredit) {
     return (
       raw
@@ -48,13 +47,11 @@ const buildDesignation = (raw = "", isCredit = false) => {
     );
   }
 
-  // Extraction du numéro de BL depuis la description
   const blMatch = raw.match(/BL\s*:\s*([^\s|,]+)/i);
   if (blMatch) {
     return `Facturation BL: ${blMatch[1]}`;
   }
 
-  // Pas de numéro de BL trouvé dans la description → on nettoie et retourne
   const cleaned = raw
     .replace(/Facturation\s+BL\s*:\s*[^\|]+\|\s*Montant\s*:\s*[\d\s]+/gi, "")
     .replace(/Facturation\s+BL\s*:\s*[^\|]+\|?/gi, "")
@@ -121,7 +118,6 @@ const styles = StyleSheet.create({
   /* ── TABLE ── */
   table: { marginTop: 8 },
 
-  // En-tête du tableau
   tableHeader: {
     flexDirection: "row",
     backgroundColor: COLORS.DARK_BLUE,
@@ -137,7 +133,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
 
-  // Lignes du tableau
   tableRow: {
     flexDirection: "row",
     borderBottomWidth: 1,
@@ -148,7 +143,6 @@ const styles = StyleSheet.create({
   tableRowAlt: { backgroundColor: COLORS.ROW_ALT },
   tableRowReport: { backgroundColor: "#F0F4FF" },
 
-  // Colonnes — largeurs ajustées pour 7 colonnes
   colDate: { width: "10%" },
   colDesc: { width: "26%" },
   colNbrCont: { width: "7%", textAlign: "center" },
@@ -157,7 +151,6 @@ const styles = StyleSheet.create({
   colDebit: { width: "12%", textAlign: "right" },
   colCredit: { width: "12%", textAlign: "right" },
 
-  // Textes cellules
   cellText: { fontSize: 8, color: COLORS.DARK_BLUE },
   cellTextBold: {
     fontSize: 8,
@@ -170,7 +163,17 @@ const styles = StyleSheet.create({
   cellReportBold: {
     fontSize: 8,
     fontFamily: "Helvetica-Bold",
-    color: "#2563EB",
+    color: "#D11306",
+  },
+
+  /* ── Sous-ligne description réelle versement ── */
+  descWrapper: { flexDirection: "column" },
+  descMain: { fontSize: 8, color: COLORS.DARK_BLUE },
+  descSub: {
+    fontSize: 7,
+    color: COLORS.PRIMARY_RED,
+    fontFamily: "Helvetica-Bold",
+    marginTop: 1,
   },
 
   /* ── SUMMARY ── */
@@ -228,13 +231,21 @@ const styles = StyleSheet.create({
 /* ─────────────────────────────────────────────
    COMPOSANT PRINCIPAL
    Props :
-     data         — tableau de transactions filtrées
-     client       — objet client
-     period       — { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
-     bilanSummary — { initial, debit, credit, final }
-     blsMap       — Map<numBl, { numDeConteneur, nbrDeConteneur, contenance }>
+     data                — tableau de transactions filtrées
+     client              — objet client
+     period              — { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
+     bilanSummary        — { initial, debit, credit, final }
+     blsMap              — Map<numBl, { numDeConteneur, nbrDeConteneur, contenance }>
+     versementsDescMap   — Map<"VERS-XXXX-XXXXXX", "description réelle saisie en caisse">
 ───────────────────────────────────────────── */
-const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
+const BilanPDF = ({
+  data = [],
+  client,
+  period,
+  bilanSummary,
+  blsMap = {},
+  versementsDescMap = {}, // ← NOUVEAU prop
+}) => (
   <Document>
     <Page size="A4" style={styles.page}>
       {/* ── HEADER ── */}
@@ -291,7 +302,7 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
         {data.map((t, i) => {
           const isCredit = t.typeOperation?.toLowerCase().includes("credit");
 
-          // Récupération des infos BL depuis blsMap
+          // Infos BL depuis blsMap
           let blInfo = null;
           if (t.numBl && blsMap[t.numBl]) {
             blInfo = blsMap[t.numBl];
@@ -306,8 +317,11 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
           const numCont = blInfo?.numDeConteneur ?? "—";
           const marchand = blInfo?.contenance ?? "—";
 
-          // ── CORRECTION 1 : désignation avec numéro de BL ──
           const designation = buildDesignation(t.description, isCredit);
+
+          // ── Vraie description du versement (depuis versementsDescMap) ──
+          const ref = isCredit ? extractReference(t.description) : null;
+          const vraiDescription = ref ? versementsDescMap[ref] : null;
 
           return (
             <View
@@ -318,10 +332,13 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
                 {new Date(t.date).toLocaleDateString("fr-FR")}
               </Text>
 
-              {/* ── CORRECTION 1 : affichage "Facturation BL: XXXXX" ── */}
-              <Text style={[styles.cellText, styles.colDesc]}>
-                {designation}
-              </Text>
+              {/* ── Désignation : ref auto + vraie description si versement ── */}
+              <View style={[styles.descWrapper, styles.colDesc]}>
+                <Text style={styles.descMain}>{designation}</Text>
+                {vraiDescription ? (
+                  <Text style={styles.descSub}>↳ {vraiDescription}</Text>
+                ) : null}
+              </View>
 
               <Text style={[styles.cellText, styles.colNbrCont]}>
                 {nbrCont}
@@ -331,7 +348,6 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
               </Text>
               <Text style={[styles.cellText, styles.colMarch]}>{marchand}</Text>
 
-              {/* ── CORRECTION 2 : fmt() utilise des espaces insécables ── */}
               <Text
                 style={[
                   isCredit ? styles.cellMuted : styles.cellDebit,

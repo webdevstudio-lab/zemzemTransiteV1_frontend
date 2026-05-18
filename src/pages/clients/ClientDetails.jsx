@@ -41,6 +41,7 @@ const ClientDetails = () => {
   const [transactions, setTransactions] = useState([]);
   const [extraServices, setExtraServices] = useState([]);
   const [bls, setBls] = useState([]);
+  const [versementsClient, setVersementsClient] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState("historique");
@@ -74,24 +75,29 @@ const ClientDetails = () => {
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const [resClient, resTrans, resExtra, resBls] = await Promise.all([
-        API.get(API_PATHS.CLIENTS.GET_ONE_CLIENT.replace(":id", cleanId)),
-        API.get(
-          API_PATHS.HISTORIQUE.CLIENTS_BY_ID.replace(":id_client", cleanId),
-        ),
-        API.get(
-          API_PATHS.FACTURATION.GET_ALL_FACTURATION_BY_CLIENT.replace(
-            ":id_client",
-            cleanId,
+      const [resClient, resTrans, resExtra, resBls, resVersements] =
+        await Promise.all([
+          API.get(API_PATHS.CLIENTS.GET_ONE_CLIENT.replace(":id", cleanId)),
+          API.get(
+            API_PATHS.HISTORIQUE.CLIENTS_BY_ID.replace(":id_client", cleanId),
           ),
-        ),
-        API.get(`${API_PATHS.BLS.GET_ALL_BL_BY_CLIENT}/${cleanId}`),
-      ]);
+          API.get(
+            API_PATHS.FACTURATION.GET_ALL_FACTURATION_BY_CLIENT.replace(
+              ":id_client",
+              cleanId,
+            ),
+          ),
+          API.get(`${API_PATHS.BLS.GET_ALL_BL_BY_CLIENT}/${cleanId}`),
+          // ── Vrais versements du client pour récupérer leur description réelle ──
+          API.get(`/versements-client/client/${cleanId}`),
+        ]);
       setClient(resClient.data.data);
       setTransactions(resTrans.data.data || []);
       const facturesRecues = resExtra.data.data;
       setExtraServices(Array.isArray(facturesRecues) ? facturesRecues : []);
       setBls(resBls.data.data || []);
+      const rawVersements = resVersements.data?.data ?? resVersements.data;
+      setVersementsClient(Array.isArray(rawVersements) ? rawVersements : []);
     } catch (err) {
       toast.error(err.message || "Erreur lors du chargement des données");
     } finally {
@@ -117,34 +123,41 @@ const ClientDetails = () => {
     return map;
   }, [bls]);
 
+  // ── Map référence → description réelle du versement ──
+  // Permet de retrouver "P BANKILI SALECK" à partir de "VERS-2026-000112"
+  const versementsDescMap = useMemo(() => {
+    const map = {};
+    versementsClient.forEach((v) => {
+      if (v.reference && v.description) {
+        map[v.reference.toUpperCase()] = v.description;
+      }
+    });
+    return map;
+  }, [versementsClient]);
+
+  // ── Extrait la référence VERS-XXXX-XXXXXX depuis une description ──
+  const extractReference = (description = "") => {
+    const match = description.match(/VERS-\d{4}-\d{6}/i);
+    return match ? match[0].toUpperCase() : null;
+  };
+
   // --- STATISTIQUES GLOBALES DU CLIENT ---
   const clientStats = useMemo(() => {
     const allBls = bls || [];
-
-    // Total BL
     const totalBL = allBls.length;
-
-    // Total conteneurs (somme de nbrDeConteneur de tous les BLs)
     const totalConteneurs = allBls.reduce(
       (sum, bl) => sum + (bl.nbrDeConteneur || 0),
       0,
     );
-
-    // Brut client = somme de toutes les charges (totalSommePayer) de tous les BLs
     const brutClient = allBls.reduce(
       (sum, bl) => sum + (bl.totalSommePayer || 0),
       0,
     );
-
-    // Chiffre d'affaires = somme de tous les montants facturés
     const chiffreAffaires = allBls.reduce(
       (sum, bl) => sum + (bl.montantFacturer || 0),
       0,
     );
-
-    // Bénéfice = Chiffre d'affaires - Brut client
     const benefice = chiffreAffaires - brutClient;
-
     return { totalBL, totalConteneurs, brutClient, chiffreAffaires, benefice };
   }, [bls]);
 
@@ -218,6 +231,45 @@ const ClientDetails = () => {
       })
       .sort((a, b) => new Date(a.date) - new Date(b.date));
   }, [transactions, dateFilters.bilan]);
+
+  // ── HELPER : cellule Désignation dans le bilan (UI web) ──
+  const getDesignationLabel = (t) => {
+    const ref = extractReference(t.description);
+    const vraiDescription = ref ? versementsDescMap[ref] : null;
+
+    if (t.type === "Versement" && ref) {
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs font-black text-slate-700 uppercase">
+            {t.description}
+          </span>
+          {vraiDescription && (
+            <span className="text-[10px] font-bold text-red-500 normal-case">
+              ↳ {vraiDescription}
+            </span>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <span className="text-xs font-black text-slate-700 uppercase">
+        {t.description || (
+          <span className="text-slate-300 font-bold italic normal-case">—</span>
+        )}
+      </span>
+    );
+  };
+
+  // ── HELPER : libellé Excel (versement → ref + description) ──
+  const getDesignationExcel = (t) => {
+    const ref = extractReference(t.description);
+    const vraiDescription = ref ? versementsDescMap[ref] : null;
+    if (t.type === "Versement" && vraiDescription) {
+      return `${t.description} — ${vraiDescription}`;
+    }
+    return t.description || "—";
+  };
 
   const handleAddService = async (e) => {
     e.preventDefault();
@@ -328,7 +380,7 @@ const ClientDetails = () => {
                   </span>
                 </div>
 
-                {/* ── BADGES TT BL / TT TC / BRUT / CA / BÉNÉFICE ── */}
+                {/* ── BADGES ── */}
                 <div className="flex flex-wrap gap-3">
                   <div className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-xl shadow-sm">
                     <FileText size={13} className="text-slate-400" />
@@ -372,8 +424,6 @@ const ClientDetails = () => {
                       </p>
                     </div>
                   </div>
-
-                  {/* ── NOUVEAU BADGE BÉNÉFICE ── */}
                   <div
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${
                       clientStats.benefice >= 0
@@ -720,9 +770,7 @@ const ClientDetails = () => {
                 <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400">
                   <tr>
                     <th className="px-8 py-4">Flux</th>
-                    {/* ✅ Type d'opération */}
                     <th className="px-8 py-4">Type</th>
-                    {/* ✅ Description complète */}
                     <th className="px-8 py-4">Description</th>
                     <th className="px-8 py-4 text-right">Montant</th>
                   </tr>
@@ -738,7 +786,6 @@ const ClientDetails = () => {
                         .includes("credit");
                       return (
                         <tr key={t._id} className="hover:bg-slate-50/50">
-                          {/* Flux : icône + date + label */}
                           <td className="px-8 py-5 flex items-center gap-4">
                             <div
                               className={`p-3 rounded-2xl ${
@@ -766,8 +813,6 @@ const ClientDetails = () => {
                               </p>
                             </div>
                           </td>
-
-                          {/* ✅ Type : enum lisible (Versement, Facturation, etc.) */}
                           <td className="px-8 py-5">
                             <span
                               className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase ${
@@ -779,8 +824,6 @@ const ClientDetails = () => {
                               {t.type || "—"}
                             </span>
                           </td>
-
-                          {/* ✅ Description : texte libre saisi lors de l'opération */}
                           <td className="px-8 py-5 text-xs font-bold text-slate-600 italic">
                             {t.description || (
                               <span className="text-slate-300 not-italic">
@@ -788,7 +831,6 @@ const ClientDetails = () => {
                               </span>
                             )}
                           </td>
-
                           <td
                             className={`px-8 py-5 text-right text-xs font-black ${
                               isCredit ? "text-emerald-500" : "text-red-500"
@@ -859,7 +901,7 @@ const ClientDetails = () => {
                                 : null;
                           return {
                             Date: new Date(t.date).toLocaleDateString("fr-FR"),
-                            Désignation: t.description.toUpperCase(),
+                            Désignation: getDesignationExcel(t).toUpperCase(),
                             "Nb Cont": blInfo?.nbrDeConteneur ?? "—",
                             "N° Conteneur": blInfo?.numDeConteneur ?? "—",
                             Marchandise: blInfo?.contenance ?? "—",
@@ -886,6 +928,8 @@ const ClientDetails = () => {
                   >
                     <Download size={16} /> Excel
                   </button>
+
+                  {/* ── PDF : on passe maintenant versementsDescMap au composant ── */}
                   <PDFDownloadLink
                     document={
                       <BilanPDF
@@ -894,6 +938,7 @@ const ClientDetails = () => {
                         bilanSummary={bilanData}
                         data={bilanTransactions}
                         blsMap={blsMap}
+                        versementsDescMap={versementsDescMap}
                       />
                     }
                     fileName={`Bilan_${client?.nom}_${new Date().toLocaleDateString("fr-FR").replace(/\//g, "-")}.pdf`}
@@ -977,6 +1022,7 @@ const ClientDetails = () => {
                           -
                         </td>
                       </tr>
+
                       {bilanTransactions
                         .slice()
                         .sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -989,11 +1035,11 @@ const ClientDetails = () => {
                               key={t._id}
                               className="hover:bg-slate-50/50 transition-colors group"
                             >
-                              <td className="px-8 py-4 text-xs text-slate-500 font-bold">
+                              <td className="px-8 py-4 text-xs text-slate-500 font-bold whitespace-nowrap">
                                 {new Date(t.date).toLocaleDateString()}
                               </td>
-                              <td className="px-8 py-4 text-xs font-black text-slate-700 uppercase">
-                                {t.description}
+                              <td className="px-8 py-4">
+                                {getDesignationLabel(t)}
                               </td>
                               <td className="px-8 py-4 text-right font-black text-red-500">
                                 {!isCredit
