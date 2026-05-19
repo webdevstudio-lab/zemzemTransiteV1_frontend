@@ -2,15 +2,18 @@ import React, { useState, useMemo, useEffect } from "react";
 import {
   Search,
   PlusCircle,
-  ChevronLeft,
-  ChevronRight,
   Edit2,
   MoreHorizontal,
   Trash2,
   AlertTriangle,
   RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+  Filter,
+  X,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import Modal from "../../components/ui/Modal";
 import API from "../../utils/axiosInstance";
@@ -19,17 +22,90 @@ import { API_PATHS } from "../../utils/apiPaths";
 import CreateBlForm from "./CreateBlForm";
 import UpdateBlForm from "./UpdateBlForm";
 
+// ─── Constantes ────────────────────────────────────────────────────────────────
+const CHARGES_FIXES_NOMS = [
+  "Liquidation",
+  "Manutention",
+  "Charges Locales",
+  "Facture Port",
+  "TS Douane",
+  "Transport",
+  "Déchargement",
+  "Bon de sortie Port",
+  "Bon de sortie Douane",
+  "Bomop",
+  "Amende",
+  "Forfait",
+  "Dépense H",
+];
+
+const SORT_DIRECTIONS = { NONE: "none", ASC: "asc", DESC: "desc" };
+
+// ─── Icône de tri ──────────────────────────────────────────────────────────────
+const SortIcon = ({ direction }) => {
+  if (direction === SORT_DIRECTIONS.ASC)
+    return <ChevronUp size={12} className="text-red-500" />;
+  if (direction === SORT_DIRECTIONS.DESC)
+    return <ChevronDown size={12} className="text-red-500" />;
+  return <ChevronsUpDown size={12} className="text-slate-300" />;
+};
+
+// ─── En-tête de colonne triable ────────────────────────────────────────────────
+const SortableHeader = ({ label, colKey, sortConfig, onSort }) => {
+  const direction =
+    sortConfig.key === colKey ? sortConfig.direction : SORT_DIRECTIONS.NONE;
+  return (
+    <th
+      className="px-6 py-4 cursor-pointer select-none group"
+      onClick={() => onSort(colKey)}
+    >
+      <div className="flex items-center gap-1.5">
+        <span>{label}</span>
+        <span className="opacity-60 group-hover:opacity-100 transition-opacity">
+          <SortIcon direction={direction} />
+        </span>
+      </div>
+    </th>
+  );
+};
+
+// ─── Composant principal ───────────────────────────────────────────────────────
 const AllBLs = () => {
   const navigate = useNavigate();
+  const location = useLocation();
 
   // --- ÉTATS ---
   const [bls, setBls] = useState([]);
   const [clients, setClients] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("tous");
-  // La pagination a été retirée pour un affichage en liste continue
+  const [searchTerm, setSearchTerm] = useState(
+    () => location.state?.searchTerm ?? "",
+  );
+  const [statusFilter, setStatusFilter] = useState(
+    () => location.state?.statusFilter ?? "tous",
+  );
+
+  // --- filtre charges non payées (multi-sélection) ---
+  const [chargeFilters, setChargeFilters] = useState(
+    () => location.state?.chargeFilters ?? [],
+  );
+  const [isChargeDropdownOpen, setIsChargeDropdownOpen] = useState(false);
+
+  const toggleChargeFilter = (nom) => {
+    setChargeFilters((prev) =>
+      prev.includes(nom) ? prev.filter((c) => c !== nom) : [...prev, nom],
+    );
+  };
+
+  // --- tri des colonnes ---
+  const [sortConfig, setSortConfig] = useState(
+    () =>
+      location.state?.sortConfig ?? {
+        key: null,
+        direction: SORT_DIRECTIONS.NONE,
+      },
+  );
 
   // --- AUTH / RÔLES ---
   const userDataRaw = localStorage.getItem("_appTransit_user");
@@ -69,10 +145,34 @@ const AllBLs = () => {
   useEffect(() => {
     fetchData();
 
-    const handleClickOutside = () => setActiveMenu(null);
+    const handleClickOutside = () => {
+      setActiveMenu(null);
+      setIsChargeDropdownOpen(false);
+    };
     window.addEventListener("click", handleClickOutside);
     return () => window.removeEventListener("click", handleClickOutside);
   }, []);
+
+  // --- PERSISTANCE DE L'ÉTAT ---
+  useEffect(() => {
+    navigate(location.pathname, {
+      replace: true,
+      state: { statusFilter, searchTerm, chargeFilters, sortConfig },
+    });
+  }, [statusFilter, searchTerm, chargeFilters, sortConfig]);
+
+  // --- NAVIGATION VERS UN BL ---
+  const handleRowClick = (bl) => {
+    navigate(`/bls/${bl._id}`, {
+      state: {
+        from: location.pathname,
+        statusFilter,
+        searchTerm,
+        chargeFilters,
+        sortConfig,
+      },
+    });
+  };
 
   // --- ACTIONS ---
   const handleConfirmDelete = async () => {
@@ -88,7 +188,18 @@ const AllBLs = () => {
     }
   };
 
-  // --- LOGIQUE DE FILTRE ---
+  // --- NOUVEAU : logique de tri ---
+  const handleSort = (colKey) => {
+    setSortConfig((prev) => {
+      if (prev.key !== colKey)
+        return { key: colKey, direction: SORT_DIRECTIONS.ASC };
+      if (prev.direction === SORT_DIRECTIONS.ASC)
+        return { key: colKey, direction: SORT_DIRECTIONS.DESC };
+      return { key: null, direction: SORT_DIRECTIONS.NONE };
+    });
+  };
+
+  // --- ONGLETS DISPONIBLES ---
   const availableTabs = useMemo(() => {
     const tabs = ["tous", "En attente", "En cours"];
     if (isAdmin || isSuperviseur) tabs.push("A validé");
@@ -96,8 +207,15 @@ const AllBLs = () => {
     return tabs;
   }, [isAdmin, isSuperviseur]);
 
+  useEffect(() => {
+    if (availableTabs.length > 0 && !availableTabs.includes(statusFilter)) {
+      setStatusFilter("tous");
+    }
+  }, [availableTabs]);
+
+  // --- FILTRE + TRI combinés ---
   const filteredBLs = useMemo(() => {
-    return bls.filter((bl) => {
+    let result = bls.filter((bl) => {
       const status = bl.etatBl?.trim();
 
       if (status === "A validé" && !isAdmin && !isSuperviseur) return false;
@@ -111,9 +229,76 @@ const AllBLs = () => {
 
       const matchesStatus = statusFilter === "tous" || status === statusFilter;
 
-      return matchesSearch && matchesStatus;
+      // filtre charges non payées (multi-sélection — logique AND : toutes les charges sélectionnées doivent être non payées)
+      const matchesCharge =
+        chargeFilters.length === 0 ||
+        chargeFilters.every((filterNom) =>
+          (bl.chargesFixes || []).some(
+            (c) =>
+              c.nom?.trim().toLowerCase() === filterNom.trim().toLowerCase() &&
+              c.paye === false,
+          ),
+        );
+
+      return matchesSearch && matchesStatus && matchesCharge;
     });
-  }, [bls, searchTerm, statusFilter, isAdmin, isSuperviseur]);
+
+    // NOUVEAU : application du tri
+    if (sortConfig.key && sortConfig.direction !== SORT_DIRECTIONS.NONE) {
+      result = [...result].sort((a, b) => {
+        let valA, valB;
+
+        switch (sortConfig.key) {
+          case "codeBl":
+            valA = a.codeBl?.toLowerCase() ?? "";
+            valB = b.codeBl?.toLowerCase() ?? "";
+            break;
+          case "numBl":
+            valA = a.numBl?.toLowerCase() ?? "";
+            valB = b.numBl?.toLowerCase() ?? "";
+            break;
+          case "client":
+            valA = a.id_client?.nom?.toLowerCase() ?? "";
+            valB = b.id_client?.nom?.toLowerCase() ?? "";
+            break;
+          case "charges":
+            valA = a.totalCharge > 0 ? a.totalChargePayer / a.totalCharge : 0;
+            valB = b.totalCharge > 0 ? b.totalChargePayer / b.totalCharge : 0;
+            break;
+          case "conteneurs":
+            valA = a.nbrDeConteneur ?? 0;
+            valB = b.nbrDeConteneur ?? 0;
+            break;
+          case "liquidation":
+            valA = a.estLiquide ? 1 : 0;
+            valB = b.estLiquide ? 1 : 0;
+            break;
+          case "statut":
+            valA = a.etatBl?.toLowerCase() ?? "";
+            valB = b.etatBl?.toLowerCase() ?? "";
+            break;
+          default:
+            return 0;
+        }
+
+        if (valA < valB)
+          return sortConfig.direction === SORT_DIRECTIONS.ASC ? -1 : 1;
+        if (valA > valB)
+          return sortConfig.direction === SORT_DIRECTIONS.ASC ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return result;
+  }, [
+    bls,
+    searchTerm,
+    statusFilter,
+    isAdmin,
+    isSuperviseur,
+    chargeFilters,
+    sortConfig,
+  ]);
 
   // --- SOUS-COMPOSANTS ---
   const ChargeProgress = ({ paye, total }) => {
@@ -196,9 +381,7 @@ const AllBLs = () => {
               placeholder="Rechercher BL, client..."
               className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm focus:ring-4 focus:ring-red-500/5 outline-none transition-all"
               value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-              }}
+              onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
 
@@ -218,9 +401,7 @@ const AllBLs = () => {
         {availableTabs.map((f) => (
           <button
             key={f}
-            onClick={() => {
-              setStatusFilter(f);
-            }}
+            onClick={() => setStatusFilter(f)}
             className={`pb-4 capitalize whitespace-nowrap transition-all border-b-2 ${
               statusFilter === f
                 ? "border-red-500 text-slate-900"
@@ -232,19 +413,182 @@ const AllBLs = () => {
         ))}
       </div>
 
-      {/* TABLEAU AVEC HAUTEUR FIXE ET OVERFLOW */}
+      {/* ── FILTRE PAR CHARGES NON RÉGLÉES (multi-sélection) ── */}
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-widest mt-2.5">
+          <Filter size={14} />
+          <span>Charges non réglées :</span>
+        </div>
+
+        {/* Dropdown multi-select */}
+        <div className="relative" onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={() => setIsChargeDropdownOpen((prev) => !prev)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-bold transition-all ${
+              chargeFilters.length > 0
+                ? "border-red-400 bg-red-50 text-red-600"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            }`}
+          >
+            <span>
+              {chargeFilters.length === 0
+                ? "Sélectionner des charges..."
+                : `${chargeFilters.length} charge${chargeFilters.length > 1 ? "s" : ""} sélectionnée${chargeFilters.length > 1 ? "s" : ""}`}
+            </span>
+            <ChevronDown
+              size={14}
+              className={`transition-transform ${isChargeDropdownOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+
+          {isChargeDropdownOpen && (
+            <div className="absolute left-0 top-full mt-2 w-72 bg-white border border-slate-100 rounded-xl shadow-xl z-50 py-2 animate-in zoom-in-95">
+              {/* En-tête avec compteur + tout désélectionner */}
+              <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  {chargeFilters.length} / {CHARGES_FIXES_NOMS.length}{" "}
+                  sélectionnée(s)
+                </span>
+                {chargeFilters.length > 0 && (
+                  <button
+                    onClick={() => setChargeFilters([])}
+                    className="text-[10px] font-bold text-red-500 hover:text-red-700 transition-colors"
+                  >
+                    Tout effacer
+                  </button>
+                )}
+              </div>
+
+              {/* Liste des charges avec checkbox */}
+              <div className="max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200">
+                {CHARGES_FIXES_NOMS.map((nom) => {
+                  const isChecked = chargeFilters.includes(nom);
+                  return (
+                    <button
+                      key={nom}
+                      onClick={() => toggleChargeFilter(nom)}
+                      className={`w-full text-left px-4 py-2.5 text-xs font-bold flex items-center gap-3 transition-colors ${
+                        isChecked
+                          ? "bg-red-50 text-red-600"
+                          : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      {/* Checkbox custom */}
+                      <span
+                        className={`size-4 rounded flex-shrink-0 flex items-center justify-center border-2 transition-all ${
+                          isChecked
+                            ? "bg-red-500 border-red-500"
+                            : "border-slate-300"
+                        }`}
+                      >
+                        {isChecked && (
+                          <svg
+                            width="8"
+                            height="6"
+                            viewBox="0 0 8 6"
+                            fill="none"
+                            xmlns="http://www.w3.org/2000/svg"
+                          >
+                            <path
+                              d="M1 3L3 5L7 1"
+                              stroke="white"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        )}
+                      </span>
+                      {nom}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Badges des charges sélectionnées */}
+        {chargeFilters.length > 0 && (
+          <div className="flex flex-wrap gap-2 items-center">
+            {chargeFilters.map((nom) => (
+              <div
+                key={nom}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 border border-red-200 rounded-xl"
+              >
+                <span className="text-xs font-bold text-red-600">{nom}</span>
+                <button
+                  onClick={() => toggleChargeFilter(nom)}
+                  className="text-red-400 hover:text-red-600 transition-colors"
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Reset tri */}
+        {sortConfig.key && (
+          <button
+            onClick={() =>
+              setSortConfig({ key: null, direction: SORT_DIRECTIONS.NONE })
+            }
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-200 transition-colors mt-0.5"
+          >
+            <X size={12} /> Réinitialiser le tri
+          </button>
+        )}
+      </div>
+
+      {/* TABLEAU */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
           <table className="w-full text-left border-collapse relative">
             <thead className="sticky top-0 z-20 bg-slate-50 shadow-sm">
               <tr className="text-[11px] font-black uppercase text-slate-400 tracking-widest">
-                <th className="px-6 py-4">Code / Date</th>
-                <th className="px-6 py-4">Numero BL</th>
-                <th className="px-6 py-4">Client</th>
-                <th className="px-6 py-4">Charges</th>
-                <th className="px-6 py-4">Num/Qte</th>
-                <th className="px-6 py-4">Liquidation</th>
-                <th className="px-6 py-4">Statut</th>
+                <SortableHeader
+                  label="Code / Date"
+                  colKey="codeBl"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="Numero BL"
+                  colKey="numBl"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="Client"
+                  colKey="client"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="Charges"
+                  colKey="charges"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="Num/Qte"
+                  colKey="conteneurs"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="Liquidation"
+                  colKey="liquidation"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
+                <SortableHeader
+                  label="Statut"
+                  colKey="statut"
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
                 <th className="px-6 py-4 w-12"></th>
               </tr>
             </thead>
@@ -253,7 +597,7 @@ const AllBLs = () => {
                 filteredBLs.map((bl) => (
                   <tr
                     key={bl._id}
-                    onClick={() => navigate(`/bls/${bl._id}`)}
+                    onClick={() => handleRowClick(bl)}
                     className="hover:bg-slate-50/50 transition-colors cursor-pointer group"
                   >
                     <td className="px-6 py-5">
@@ -312,7 +656,7 @@ const AllBLs = () => {
                             onClick={(e) => {
                               e.stopPropagation();
                               setActiveMenu(
-                                activeMenu === bl._id ? null : bl._id
+                                activeMenu === bl._id ? null : bl._id,
                               );
                             }}
                             className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
@@ -366,15 +710,20 @@ const AllBLs = () => {
           </table>
         </div>
 
-        {/* FOOTER STATISTIQUE (Remplace le bandeau de pagination) */}
-        <div className="px-6 py-4 border-t border-slate-50 bg-slate-50/30">
+        {/* FOOTER */}
+        <div className="px-6 py-4 border-t border-slate-50 bg-slate-50/30 flex items-center justify-between gap-4 flex-wrap">
           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">
             Total : {filteredBLs.length} Dossier(s) affiché(s)
           </p>
+          {chargeFilters.length > 0 && (
+            <p className="text-xs font-bold text-red-400 uppercase tracking-widest">
+              Filtre actif : {chargeFilters.join(" + ")} — non réglée(s)
+            </p>
+          )}
         </div>
       </div>
 
-      {/* MODALS SÉCURISÉS */}
+      {/* MODALS */}
       <Modal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}

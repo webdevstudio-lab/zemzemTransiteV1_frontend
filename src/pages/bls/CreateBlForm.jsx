@@ -1,10 +1,33 @@
 import React, { useState } from "react";
 import Select from "react-select";
 import countries from "world-countries";
-import { Package, Hash, Globe, User, FileText } from "lucide-react";
+import { Package, Hash, Globe, User, FileText, Ship } from "lucide-react";
 import API from "../../utils/axiosInstance";
 import { API_PATHS } from "../../utils/apiPaths";
 import toast from "react-hot-toast";
+
+const TRANSPORTEURS = [
+  { value: "MSC", label: "MSC – Mediterranean Shipping Company" },
+  { value: "MAERSK", label: "Maersk Line" },
+  { value: "CMA CGM", label: "CMA CGM" },
+  { value: "COSCO", label: "COSCO Shipping" },
+  { value: "EVERGREEN", label: "Evergreen Marine" },
+  { value: "HAPAG-LLOYD", label: "Hapag-Lloyd" },
+  { value: "ONE", label: "ONE – Ocean Network Express" },
+  { value: "YANG MING", label: "Yang Ming Marine" },
+  { value: "HMM", label: "HMM – Hyundai Merchant Marine" },
+  { value: "PIL", label: "PIL – Pacific International Lines" },
+  { value: "ARKAS", label: "Arkas Line" },
+  { value: "GRIMALDI", label: "Grimaldi Lines" },
+  { value: "DELMAS", label: "Delmas" },
+  { value: "AFRICA EXPRESS", label: "Africa Express Line" },
+  { value: "SAFMARINE", label: "Safmarine" },
+  { value: "MARFRET", label: "Marfret" },
+  { value: "TROPICAL SHIPPING", label: "Tropical Shipping" },
+  { value: "SEABOARD MARINE", label: "Seaboard Marine" },
+  { value: "KING OCEAN", label: "King Ocean Services" },
+  { value: "AUTRE", label: "Autre transporteur" },
+];
 
 const CreateBlForm = ({ clients, onCancel, onSuccess }) => {
   const [loading, setLoading] = useState(false);
@@ -18,6 +41,7 @@ const CreateBlForm = ({ clients, onCancel, onSuccess }) => {
     typeConteneur: "40",
     numDeclaration: "",
     id_client: "",
+    nomTransporteur: "",
   });
 
   const countryOptions = countries.map((c) => ({
@@ -83,8 +107,8 @@ const CreateBlForm = ({ clients, onCancel, onSuccess }) => {
       backgroundColor: state.isSelected
         ? "#EF233C"
         : state.isFocused
-        ? "#fff1f2"
-        : "transparent",
+          ? "#fff1f2"
+          : "transparent",
       color: state.isSelected ? "white" : "#475569",
       borderRadius: "8px",
       margin: "2px 0",
@@ -95,7 +119,7 @@ const CreateBlForm = ({ clients, onCancel, onSuccess }) => {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col h-full max-h-[90vh]">
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
-        {/* SECTION 1 : CLIENT & NUMERO BL (Encadré) */}
+        {/* SECTION 1 : CLIENT & NUMERO BL */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 bg-slate-50/80 p-5 rounded-2xl border border-slate-100">
           <div className="space-y-2">
             <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider flex items-center gap-2">
@@ -130,7 +154,7 @@ const CreateBlForm = ({ clients, onCancel, onSuccess }) => {
           </div>
         </div>
 
-        {/* SECTION 2 : LOGISTIQUE (Grille alignée) */}
+        {/* SECTION 2 : LOGISTIQUE */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div className="space-y-2">
             <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider flex items-center gap-2">
@@ -198,9 +222,28 @@ const CreateBlForm = ({ clients, onCancel, onSuccess }) => {
               placeholder="Choisir le pays..."
             />
           </div>
+
+          {/* ✅ NOUVEAU : Transporteur */}
+          <div className="space-y-2 md:col-span-2">
+            <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider flex items-center gap-2">
+              <Ship size={14} /> Transporteur / Compagnie Maritime
+            </label>
+            <Select
+              styles={selectStyle}
+              options={TRANSPORTEURS}
+              onChange={(opt) =>
+                setFormData({
+                  ...formData,
+                  nomTransporteur: opt ? opt.value : "",
+                })
+              }
+              placeholder="Sélectionner le transporteur..."
+              isSearchable
+            />
+          </div>
         </div>
 
-        {/* SECTION 3 : DOUANE & CONTENU (Pleine largeur) */}
+        {/* SECTION 3 : DOUANE & CONTENU */}
         <div className="space-y-5">
           <div className="space-y-2">
             <label className="text-[11px] font-bold uppercase text-slate-400 tracking-wider flex items-center gap-2">

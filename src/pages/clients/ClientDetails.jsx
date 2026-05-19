@@ -21,6 +21,9 @@ import {
   FileText,
   Edit2,
   Trash2,
+  Package,
+  TrendingUp,
+  BadgeDollarSign,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
@@ -34,14 +37,13 @@ const ClientDetails = () => {
   const navigate = useNavigate();
   const cleanId = id.split("_")[0];
 
-  // --- ÉTATS DE DONNÉES ---
   const [client, setClient] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [extraServices, setExtraServices] = useState([]);
   const [bls, setBls] = useState([]);
+  const [versementsClient, setVersementsClient] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // --- ÉTATS D'INTERFACE ---
   const [activeTab, setActiveTab] = useState("historique");
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -60,41 +62,42 @@ const ClientDetails = () => {
     bilan: { start: initialDateStart, end: initialDateEnd },
   });
 
-  // États Modales
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [currentService, setCurrentService] = useState(null);
-
   const [newService, setNewService] = useState({
     description: "",
     montant: "",
     numBl: "",
   });
 
-  // --- CHARGEMENT DES DONNÉES ---
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const [resClient, resTrans, resExtra, resBls] = await Promise.all([
-        API.get(API_PATHS.CLIENTS.GET_ONE_CLIENT.replace(":id", cleanId)),
-        API.get(
-          API_PATHS.HISTORIQUE.CLIENTS_BY_ID.replace(":id_client", cleanId),
-        ),
-        API.get(
-          API_PATHS.FACTURATION.GET_ALL_FACTURATION_BY_CLIENT.replace(
-            ":id_client",
-            cleanId,
+      const [resClient, resTrans, resExtra, resBls, resVersements] =
+        await Promise.all([
+          API.get(API_PATHS.CLIENTS.GET_ONE_CLIENT.replace(":id", cleanId)),
+          API.get(
+            API_PATHS.HISTORIQUE.CLIENTS_BY_ID.replace(":id_client", cleanId),
           ),
-        ),
-        API.get(`${API_PATHS.BLS.GET_ALL_BL_BY_CLIENT}/${cleanId}`),
-      ]);
-
+          API.get(
+            API_PATHS.FACTURATION.GET_ALL_FACTURATION_BY_CLIENT.replace(
+              ":id_client",
+              cleanId,
+            ),
+          ),
+          API.get(`${API_PATHS.BLS.GET_ALL_BL_BY_CLIENT}/${cleanId}`),
+          // ── Vrais versements du client pour récupérer leur description réelle ──
+          API.get(`/versements-client/client/${cleanId}`),
+        ]);
       setClient(resClient.data.data);
       setTransactions(resTrans.data.data || []);
       const facturesRecues = resExtra.data.data;
       setExtraServices(Array.isArray(facturesRecues) ? facturesRecues : []);
       setBls(resBls.data.data || []);
+      const rawVersements = resVersements.data?.data ?? resVersements.data;
+      setVersementsClient(Array.isArray(rawVersements) ? rawVersements : []);
     } catch (err) {
       toast.error(err.message || "Erreur lors du chargement des données");
     } finally {
@@ -106,11 +109,6 @@ const ClientDetails = () => {
     fetchData();
   }, [id]);
 
-  /* ─────────────────────────────────────────────
-     blsMap : index des BLs par numBl
-     Utilisé par BilanPDF pour enrichir chaque
-     transaction avec NbrCont, NumCont, contenance
-  ───────────────────────────────────────────── */
   const blsMap = useMemo(() => {
     const map = {};
     (bls || []).forEach((bl) => {
@@ -125,7 +123,44 @@ const ClientDetails = () => {
     return map;
   }, [bls]);
 
-  // --- LOGIQUE DE FILTRAGE DES BLs ---
+  // ── Map référence → description réelle du versement ──
+  // Permet de retrouver "P BANKILI SALECK" à partir de "VERS-2026-000112"
+  const versementsDescMap = useMemo(() => {
+    const map = {};
+    versementsClient.forEach((v) => {
+      if (v.reference && v.description) {
+        map[v.reference.toUpperCase()] = v.description;
+      }
+    });
+    return map;
+  }, [versementsClient]);
+
+  // ── Extrait la référence VERS-XXXX-XXXXXX depuis une description ──
+  const extractReference = (description = "") => {
+    const match = description.match(/VERS-\d{4}-\d{6}/i);
+    return match ? match[0].toUpperCase() : null;
+  };
+
+  // --- STATISTIQUES GLOBALES DU CLIENT ---
+  const clientStats = useMemo(() => {
+    const allBls = bls || [];
+    const totalBL = allBls.length;
+    const totalConteneurs = allBls.reduce(
+      (sum, bl) => sum + (bl.nbrDeConteneur || 0),
+      0,
+    );
+    const brutClient = allBls.reduce(
+      (sum, bl) => sum + (bl.totalSommePayer || 0),
+      0,
+    );
+    const chiffreAffaires = allBls.reduce(
+      (sum, bl) => sum + (bl.montantFacturer || 0),
+      0,
+    );
+    const benefice = chiffreAffaires - brutClient;
+    return { totalBL, totalConteneurs, brutClient, chiffreAffaires, benefice };
+  }, [bls]);
+
   const filteredBLs = (bls || []).filter((bl) => {
     const isFacture = bl.etatBl === "Facturé";
     const reference = (bl.numBl || bl.numDeBl || "").toLowerCase();
@@ -133,15 +168,12 @@ const ClientDetails = () => {
     return isFacture && matchesSearch;
   });
 
-  // --- LOGIQUE DE FILTRAGE DES SERVICES EXTRA ---
   const filteredExtra = useMemo(() => {
     const servicesArray = Array.isArray(extraServices) ? extraServices : [];
-    if (!searchTerm && !dateFilters.extra.start && !dateFilters.extra.end) {
+    if (!searchTerm && !dateFilters.extra.start && !dateFilters.extra.end)
       return servicesArray;
-    }
     return servicesArray.filter((s) => {
-      const sDate = new Date(s.date || s.createdAt);
-      const date = new Date(sDate);
+      const date = new Date(s.date || s.createdAt);
       const start = dateFilters.extra.start
         ? new Date(dateFilters.extra.start)
         : null;
@@ -158,25 +190,20 @@ const ClientDetails = () => {
     });
   }, [extraServices, dateFilters.extra, searchTerm]);
 
-  // --- LOGIQUE DU BILAN FINANCIER ---
   const bilanData = useMemo(() => {
     const result = { initial: 0, debit: 0, credit: 0, final: 0 };
     if (!transactions || transactions.length === 0) return result;
-
     const start = new Date(dateFilters.bilan.start);
     start.setHours(0, 0, 0, 0);
     const end = new Date(dateFilters.bilan.end);
     end.setHours(23, 59, 59, 999);
-
-    let soldeInitial = 0;
-    let totalDebit = 0;
-    let totalCredit = 0;
-
+    let soldeInitial = 0,
+      totalDebit = 0,
+      totalCredit = 0;
     transactions.forEach((op) => {
       const opDate = new Date(op.date);
       const montant = Number(op.montant) || 0;
       const isCredit = op.typeOperation === "Credit";
-
       if (opDate < start) {
         soldeInitial += isCredit ? montant : -montant;
       } else if (opDate >= start && opDate <= end) {
@@ -184,17 +211,14 @@ const ClientDetails = () => {
         else totalDebit += montant;
       }
     });
-
-    const soldeFinal = soldeInitial - totalDebit + totalCredit;
     return {
       initial: soldeInitial,
       debit: totalDebit,
       credit: totalCredit,
-      final: soldeFinal,
+      final: soldeInitial - totalDebit + totalCredit,
     };
   }, [transactions, dateFilters.bilan]);
 
-  // --- HELPER : transactions filtrées pour la période bilan ---
   const bilanTransactions = useMemo(() => {
     const start = new Date(dateFilters.bilan.start);
     start.setHours(0, 0, 0, 0);
@@ -208,7 +232,45 @@ const ClientDetails = () => {
       .sort((a, b) => new Date(a.date) - new Date(b.date));
   }, [transactions, dateFilters.bilan]);
 
-  // --- ACTIONS ---
+  // ── HELPER : cellule Désignation dans le bilan (UI web) ──
+  const getDesignationLabel = (t) => {
+    const ref = extractReference(t.description);
+    const vraiDescription = ref ? versementsDescMap[ref] : null;
+
+    if (t.type === "Versement" && ref) {
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs font-black text-slate-700 uppercase">
+            {t.description}
+          </span>
+          {vraiDescription && (
+            <span className="text-[10px] font-bold text-red-500 normal-case">
+              ↳ {vraiDescription}
+            </span>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <span className="text-xs font-black text-slate-700 uppercase">
+        {t.description || (
+          <span className="text-slate-300 font-bold italic normal-case">—</span>
+        )}
+      </span>
+    );
+  };
+
+  // ── HELPER : libellé Excel (versement → ref + description) ──
+  const getDesignationExcel = (t) => {
+    const ref = extractReference(t.description);
+    const vraiDescription = ref ? versementsDescMap[ref] : null;
+    if (t.type === "Versement" && vraiDescription) {
+      return `${t.description} — ${vraiDescription}`;
+    }
+    return t.description || "—";
+  };
+
   const handleAddService = async (e) => {
     e.preventDefault();
     try {
@@ -245,7 +307,7 @@ const ClientDetails = () => {
       toast.success("Mise à jour effectuée");
       setIsEditModalOpen(false);
       fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erreur de mise à jour");
     }
   };
@@ -261,7 +323,7 @@ const ClientDetails = () => {
       toast.success("Service supprimé");
       setIsDeleteModalOpen(false);
       fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erreur de suppression");
     }
   };
@@ -279,7 +341,7 @@ const ClientDetails = () => {
   return (
     <div className="min-h-screen bg-[#F8F9FA] p-4 md:p-8 animate-fadeIn">
       <div className="max-w-6xl mx-auto space-y-6">
-        {/* HEADER & CLIENT INFO */}
+        {/* RETOUR */}
         <div className="flex items-center justify-between">
           <button
             onClick={() => navigate("/clients")}
@@ -289,6 +351,7 @@ const ClientDetails = () => {
           </button>
         </div>
 
+        {/* HEADER CLIENT */}
         <div className="bg-white rounded-[2rem] p-8 border border-slate-100 shadow-xl shadow-slate-200/50 relative overflow-hidden">
           <div className="relative flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div className="flex items-start gap-6">
@@ -306,7 +369,7 @@ const ClientDetails = () => {
                     <ShieldCheck className="text-emerald-500" size={20} />
                   )}
                 </div>
-                <div className="flex flex-wrap gap-4">
+                <div className="flex flex-wrap gap-4 mb-4">
                   <span className="flex items-center gap-1.5 text-xs font-bold text-slate-400 uppercase">
                     <Briefcase size={14} className="text-red-500" />{" "}
                     {client?.typeClient}
@@ -316,8 +379,94 @@ const ClientDetails = () => {
                     {client?.adresse}
                   </span>
                 </div>
+
+                {/* ── BADGES ── */}
+                <div className="flex flex-wrap gap-3">
+                  <div className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-xl shadow-sm">
+                    <FileText size={13} className="text-slate-400" />
+                    <span className="text-[10px] font-black uppercase text-slate-400">
+                      TT BL
+                    </span>
+                    <span className="text-sm font-black">
+                      {clientStats.totalBL}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-xl shadow-sm">
+                    <Box size={13} className="text-slate-400" />
+                    <span className="text-[10px] font-black uppercase text-slate-400">
+                      TT TC
+                    </span>
+                    <span className="text-sm font-black">
+                      {clientStats.totalConteneurs}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-4 py-2 rounded-xl">
+                    <TrendingUp size={13} className="text-amber-500" />
+                    <div>
+                      <p className="text-[8px] font-black uppercase text-amber-500 leading-none">
+                        Brut Client
+                      </p>
+                      <p className="text-xs font-black text-amber-700">
+                        {clientStats.brutClient.toLocaleString("fr-FR")}{" "}
+                        <span className="text-[9px] font-bold">MRU</span>
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-4 py-2 rounded-xl">
+                    <Wallet size={13} className="text-blue-500" />
+                    <div>
+                      <p className="text-[8px] font-black uppercase text-blue-500 leading-none">
+                        Chiffre d'affaires
+                      </p>
+                      <p className="text-xs font-black text-blue-700">
+                        {clientStats.chiffreAffaires.toLocaleString("fr-FR")}{" "}
+                        <span className="text-[9px] font-bold">MRU</span>
+                      </p>
+                    </div>
+                  </div>
+                  <div
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${
+                      clientStats.benefice >= 0
+                        ? "bg-emerald-50 border-emerald-200"
+                        : "bg-red-50 border-red-200"
+                    }`}
+                  >
+                    <BadgeDollarSign
+                      size={13}
+                      className={
+                        clientStats.benefice >= 0
+                          ? "text-emerald-500"
+                          : "text-red-500"
+                      }
+                    />
+                    <div>
+                      <p
+                        className={`text-[8px] font-black uppercase leading-none ${
+                          clientStats.benefice >= 0
+                            ? "text-emerald-500"
+                            : "text-red-500"
+                        }`}
+                      >
+                        Bénéfice
+                      </p>
+                      <p
+                        className={`text-xs font-black ${
+                          clientStats.benefice >= 0
+                            ? "text-emerald-700"
+                            : "text-red-700"
+                        }`}
+                      >
+                        {clientStats.benefice >= 0 ? "+" : ""}
+                        {clientStats.benefice.toLocaleString("fr-FR")}{" "}
+                        <span className="text-[9px] font-bold">MRU</span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
+
+            {/* SOLDE GLOBAL */}
             <div className="bg-slate-900 rounded-2xl p-4 min-w-[200px] border border-slate-100 text-right">
               <p className="text-[10px] font-black text-slate-400 uppercase mb-1">
                 Solde Global
@@ -332,7 +481,7 @@ const ClientDetails = () => {
           </div>
         </div>
 
-        {/* TABS NAVIGATION */}
+        {/* TABS */}
         <div className="flex gap-8 border-b border-slate-200 px-4 overflow-x-auto scrollbar-hide">
           {[
             {
@@ -413,6 +562,7 @@ const ClientDetails = () => {
                     <tr>
                       <th className="px-8 py-4">Référence BL</th>
                       <th className="px-8 py-4">Nbr/Num conteneur</th>
+                      <th className="px-8 py-4">Marchandise</th>
                       <th className="px-8 py-4 text-center">Montant Facturé</th>
                       <th className="px-8 py-4 text-center">Statut</th>
                       <th className="px-8 py-4 text-right">Détails</th>
@@ -451,6 +601,17 @@ const ClientDetails = () => {
                               {bl.numDeConteneur}
                             </span>
                           </td>
+                          <td className="px-8 py-5">
+                            <div className="flex items-center gap-2">
+                              <Package
+                                size={13}
+                                className="text-slate-300 flex-shrink-0"
+                              />
+                              <span className="text-xs font-bold text-slate-600 uppercase">
+                                {bl.contenance || "—"}
+                              </span>
+                            </div>
+                          </td>
                           <td className="px-8 py-5 text-center">
                             <span className="text-sm font-black text-[#EF233C]">
                               {new Intl.NumberFormat("fr-FR").format(
@@ -477,7 +638,7 @@ const ClientDetails = () => {
                     ) : (
                       <tr>
                         <td
-                          colSpan="5"
+                          colSpan="6"
                           className="px-8 py-20 text-center text-slate-400"
                         >
                           <div className="flex flex-col items-center gap-2 opacity-20">
@@ -535,7 +696,6 @@ const ClientDetails = () => {
                   </button>
                 </div>
               </div>
-
               <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
                 <table className="w-full text-left border-collapse">
                   <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 sticky top-0">
@@ -610,7 +770,8 @@ const ClientDetails = () => {
                 <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400">
                   <tr>
                     <th className="px-8 py-4">Flux</th>
-                    <th className="px-8 py-4">Détails</th>
+                    <th className="px-8 py-4">Type</th>
+                    <th className="px-8 py-4">Description</th>
                     <th className="px-8 py-4 text-right">Montant</th>
                   </tr>
                 </thead>
@@ -627,7 +788,11 @@ const ClientDetails = () => {
                         <tr key={t._id} className="hover:bg-slate-50/50">
                           <td className="px-8 py-5 flex items-center gap-4">
                             <div
-                              className={`p-3 rounded-2xl ${isCredit ? "bg-emerald-50 text-emerald-500" : "bg-red-50 text-red-500"}`}
+                              className={`p-3 rounded-2xl ${
+                                isCredit
+                                  ? "bg-emerald-50 text-emerald-500"
+                                  : "bg-red-50 text-red-500"
+                              }`}
                             >
                               {isCredit ? (
                                 <ArrowDownLeft size={18} />
@@ -640,17 +805,36 @@ const ClientDetails = () => {
                                 {new Date(t.date).toLocaleDateString()}
                               </p>
                               <p
-                                className={`text-[9px] font-bold uppercase ${isCredit ? "text-emerald-400" : "text-red-400"}`}
+                                className={`text-[9px] font-bold uppercase ${
+                                  isCredit ? "text-emerald-400" : "text-red-400"
+                                }`}
                               >
                                 {isCredit ? "Crédit" : "Débit"}
                               </p>
                             </div>
                           </td>
-                          <td className="px-8 py-5 text-xs font-black text-slate-600">
-                            {t.description}
+                          <td className="px-8 py-5">
+                            <span
+                              className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase ${
+                                isCredit
+                                  ? "bg-emerald-50 text-emerald-600"
+                                  : "bg-red-50 text-red-500"
+                              }`}
+                            >
+                              {t.type || "—"}
+                            </span>
+                          </td>
+                          <td className="px-8 py-5 text-xs font-bold text-slate-600 italic">
+                            {t.description || (
+                              <span className="text-slate-300 not-italic">
+                                —
+                              </span>
+                            )}
                           </td>
                           <td
-                            className={`px-8 py-5 text-right text-xs font-black ${isCredit ? "text-emerald-500" : "text-red-500"}`}
+                            className={`px-8 py-5 text-right text-xs font-black ${
+                              isCredit ? "text-emerald-500" : "text-red-500"
+                            }`}
                           >
                             {isCredit ? "+" : "-"} {t.montant.toLocaleString()}{" "}
                             MRU
@@ -666,7 +850,6 @@ const ClientDetails = () => {
           {/* ONGLET BILAN & BALANCE */}
           {activeTab === "bilan" && (
             <div className="space-y-6 animate-fadeIn">
-              {/* BARRE D'ACTIONS */}
               <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-wrap items-center gap-4">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-slate-900 text-white rounded-lg">
@@ -690,7 +873,6 @@ const ClientDetails = () => {
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* BOUTON EXCEL */}
                   <button
                     onClick={() => {
                       const excelData = [
@@ -719,7 +901,7 @@ const ClientDetails = () => {
                                 : null;
                           return {
                             Date: new Date(t.date).toLocaleDateString("fr-FR"),
-                            Désignation: t.description.toUpperCase(),
+                            Désignation: getDesignationExcel(t).toUpperCase(),
                             "Nb Cont": blInfo?.nbrDeConteneur ?? "—",
                             "N° Conteneur": blInfo?.numDeConteneur ?? "—",
                             Marchandise: blInfo?.contenance ?? "—",
@@ -747,7 +929,7 @@ const ClientDetails = () => {
                     <Download size={16} /> Excel
                   </button>
 
-                  {/* BOUTON PDF — blsMap passé en prop */}
+                  {/* ── PDF : on passe maintenant versementsDescMap au composant ── */}
                   <PDFDownloadLink
                     document={
                       <BilanPDF
@@ -756,6 +938,7 @@ const ClientDetails = () => {
                         bilanSummary={bilanData}
                         data={bilanTransactions}
                         blsMap={blsMap}
+                        versementsDescMap={versementsDescMap}
                       />
                     }
                     fileName={`Bilan_${client?.nom}_${new Date().toLocaleDateString("fr-FR").replace(/\//g, "-")}.pdf`}
@@ -773,7 +956,6 @@ const ClientDetails = () => {
                 </div>
               </div>
 
-              {/* CARTES DE RÉSUMÉ */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <SummaryCard
                   title="Solde Initial"
@@ -802,7 +984,6 @@ const ClientDetails = () => {
                 />
               </div>
 
-              {/* TABLEAU DU BILAN */}
               <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
                 <div className="max-h-[500px] overflow-y-auto">
                   <table className="w-full text-left border-collapse">
@@ -823,7 +1004,6 @@ const ClientDetails = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                      {/* LIGNE DE REPORT */}
                       <tr className="bg-slate-50/50 font-bold italic">
                         <td className="px-8 py-4 text-[10px] text-slate-400">
                           ---
@@ -843,7 +1023,6 @@ const ClientDetails = () => {
                         </td>
                       </tr>
 
-                      {/* TRANSACTIONS */}
                       {bilanTransactions
                         .slice()
                         .sort((a, b) => new Date(b.date) - new Date(a.date))
@@ -856,11 +1035,11 @@ const ClientDetails = () => {
                               key={t._id}
                               className="hover:bg-slate-50/50 transition-colors group"
                             >
-                              <td className="px-8 py-4 text-xs text-slate-500 font-bold">
+                              <td className="px-8 py-4 text-xs text-slate-500 font-bold whitespace-nowrap">
                                 {new Date(t.date).toLocaleDateString()}
                               </td>
-                              <td className="px-8 py-4 text-xs font-black text-slate-700 uppercase">
-                                {t.description}
+                              <td className="px-8 py-4">
+                                {getDesignationLabel(t)}
                               </td>
                               <td className="px-8 py-4 text-right font-black text-red-500">
                                 {!isCredit
@@ -928,7 +1107,7 @@ const ClientDetails = () => {
         </div>
       </div>
 
-      {/* MODALES */}
+      {/* MODAL NOUVEAU SERVICE */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <div className="bg-white rounded-[2.5rem] w-full max-w-md p-8 shadow-2xl relative">
@@ -993,6 +1172,7 @@ const ClientDetails = () => {
         </div>
       )}
 
+      {/* MODAL MODIFIER SERVICE */}
       {isEditModalOpen && currentService && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <div className="bg-white rounded-[2.5rem] w-full max-w-md p-8 shadow-2xl relative">
@@ -1037,6 +1217,7 @@ const ClientDetails = () => {
         </div>
       )}
 
+      {/* MODAL SUPPRESSION */}
       {isDeleteModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
@@ -1078,7 +1259,7 @@ const ClientDetails = () => {
   );
 };
 
-/* ── SOUS-COMPOSANTS (inchangés) ── */
+/* ── SOUS-COMPOSANTS ── */
 const DateFilter = ({ values, onChange }) => (
   <div className="flex gap-4 items-center">
     <div className="space-y-1">

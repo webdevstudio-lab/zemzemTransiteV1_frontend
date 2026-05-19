@@ -14,7 +14,7 @@ import {
   RefreshCw,
   Printer,
   UserCheck,
-  ArrowRightLeft, // Icone pour retraits
+  ArrowRightLeft,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import Modal from "../../components/ui/Modal";
@@ -22,38 +22,41 @@ import API from "../../utils/axiosInstance";
 import { API_PATHS } from "../../utils/apiPaths";
 import { pdf } from "@react-pdf/renderer";
 
-// --- IMPORTS DES COMPOSANTS EXTERNES ---
 import VersementClientForm from "./VersementClientForm";
 import RechargeCaisseForm from "./RechargeCaisseForm";
 import EditVersementClientForm from "./EditVersementClientForm";
-import RetraitClientForm from "./RetraitClientForm"; // Nouveau
-import EditRetraitClientForm from "./EditRetraitClientForm"; // Nouveau
+import RetraitClientForm from "./RetraitClientForm";
+import EditRetraitClientForm from "./EditRetraitClientForm";
 import BordereauVersement from "./BordereauVersement";
-import BordereauRetrait from "./BordereauRetrait"; // Nouveau
+import BordereauRetrait from "./BordereauRetrait";
+
+// ✅ Helper : extrait un tableau peu importe la structure de la réponse
+const extractArray = (responseData) => {
+  if (Array.isArray(responseData)) return responseData;
+  if (Array.isArray(responseData?.data)) return responseData.data;
+  return [];
+};
 
 const Caisse = () => {
-  // --- ÉTATS ---
   const [historiqueCaisse, setHistoriqueCaisse] = useState([]);
   const [versementsAgent, setVersementsAgent] = useState([]);
   const [rechargesCaisse, setRechargesCaisse] = useState([]);
   const [versementsClient, setVersementsClient] = useState([]);
-  const [retraitsClient, setRetraitsClient] = useState([]); // Nouvel état pour les retraits
+  const [retraitsClient, setRetraitsClient] = useState([]);
   const [balances, setBalances] = useState({ solde: 0, soldeDouane: 0 });
   const [isLoading, setIsLoading] = useState(true);
 
-  // --- FILTRES ---
   const [activeTab, setActiveTab] = useState("historique");
   const [searchTerm, setSearchTerm] = useState("");
   const [dateDebut, setDateDebut] = useState("");
   const [dateFin, setDateFin] = useState("");
 
-  // --- MODALS ---
   const [isDepositOpen, setIsDepositOpen] = useState(false);
-  const [isRetraitOpen, setIsRetraitOpen] = useState(false); // Nouveau
+  const [isRetraitOpen, setIsRetraitOpen] = useState(false);
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isEditClientOpen, setIsEditClientOpen] = useState(false);
-  const [isEditRetraitOpen, setIsEditRetraitOpen] = useState(false); // Nouveau
+  const [isEditRetraitOpen, setIsEditRetraitOpen] = useState(false);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState(null);
 
@@ -62,7 +65,6 @@ const Caisse = () => {
     description: "",
   });
 
-  // --- CHARGEMENT DES DONNÉES ---
   const fetchData = async () => {
     try {
       setIsLoading(true);
@@ -73,7 +75,7 @@ const Caisse = () => {
         resAgents,
         resRecharges,
         resVClient,
-        resRClient, // Nouveau
+        resRClient,
       ] = await Promise.all([
         API.get(API_PATHS.GETINFO.GET_INFO_CAISSE),
         API.get(API_PATHS.GETINFO.GET_INFO_CREDIT),
@@ -81,18 +83,20 @@ const Caisse = () => {
         API.get(API_PATHS.VERSEMENTAGENT.GET_ALL_VERSEMENT_AGENT),
         API.get(API_PATHS.RECHARGE.GET_ALL_RECHARGE),
         API.get(API_PATHS.VERSEMENTCLIENT.GET_ALL_VERSEMENT_CLIENT),
-        API.get(API_PATHS.RETRAIT_CLIENT.GET_ALL_RETRAIT_CLIENT), // Appel Retraits
+        API.get(API_PATHS.RETRAIT_CLIENT.GET_ALL_RETRAIT_CLIENT),
       ]);
 
       setBalances({
         solde: resCaisse.data?.solde || 0,
         soldeDouane: resDouane.data?.montant || 0,
       });
-      setHistoriqueCaisse(resHist.data?.data || []);
-      setVersementsAgent(resAgents.data?.data || []);
-      setRechargesCaisse(resRecharges.data?.data || []);
-      setVersementsClient(resVClient.data?.data || []);
-      setRetraitsClient(resRClient.data?.data || []); // Stockage Retraits
+
+      setHistoriqueCaisse(extractArray(resHist.data));
+      setVersementsAgent(extractArray(resAgents.data));
+      setRechargesCaisse(extractArray(resRecharges.data));
+      // ✅ Correction principale — gère { data: [...] } ET [...] directement
+      setVersementsClient(extractArray(resVClient.data));
+      setRetraitsClient(extractArray(resRClient.data));
     } catch (err) {
       toast.error("Erreur de récupération des données");
     } finally {
@@ -104,7 +108,6 @@ const Caisse = () => {
     fetchData();
   }, []);
 
-  // --- GESTION ACTIONS (IMPRESSION) ---
   const handlePrint = async (item, type) => {
     try {
       const doc =
@@ -123,7 +126,6 @@ const Caisse = () => {
     }
   };
 
-  // --- OUVERTURE MODALS EDITION ---
   const openEditModal = (transaction) => {
     setSelectedTransaction(transaction);
     if (activeTab === "versements_client") {
@@ -144,7 +146,6 @@ const Caisse = () => {
     setIsDeleteOpen(true);
   };
 
-  // --- GESTION UPDATE (Agents & Recharges) ---
   const handleEdit = async (e) => {
     e.preventDefault();
     try {
@@ -153,34 +154,27 @@ const Caisse = () => {
         montant: Number(editFormData.montant),
         description: editFormData.description,
       };
-
       const urlTemplate = isRecharge
         ? API_PATHS.RECHARGE.UPDATE_RECHARGE
         : API_PATHS.VERSEMENTAGENT.UPDATE_VERSEMENT_AGENT;
-
       const url = urlTemplate.replace(":id", selectedTransaction._id);
       await API.patch(url, payload);
-
       toast.success("Mise à jour réussie");
       setIsEditOpen(false);
       fetchData();
     } catch (err) {
       toast.error(
-        err.response?.data?.message || "Erreur lors de la modification"
+        err.response?.data?.message || "Erreur lors de la modification",
       );
     }
   };
 
-  // --- GESTION SUPPRESSION ---
   const handleDelete = async () => {
     try {
-      // 1. Récupérer l'ID de l'utilisateur connecté (celui qui fait l'action)
       const userData = JSON.parse(localStorage.getItem("_appTransit_user"));
       const idUser = userData?._id || userData?.id;
-
-      if (!idUser) {
+      if (!idUser)
         return toast.error("Session expirée, veuillez vous reconnecter");
-      }
 
       let urlTemplate = "";
       if (activeTab === "recharges")
@@ -193,24 +187,17 @@ const Caisse = () => {
         urlTemplate = API_PATHS.RETRAIT_CLIENT.DELETE_RETRAIT_CLIENT;
 
       const url = urlTemplate.replace(":id", selectedTransaction._id);
-
-      // 2. Envoyer la requête avec l'idUser dans l'objet 'data'
-      // Note : Pour un DELETE, Axios exige que le body soit passé dans une clé nommée 'data'
-      await API.delete(url, {
-        data: { idUser: idUser },
-      });
-
+      await API.delete(url, { data: { idUser } });
       toast.success("Suppression réussie et soldes mis à jour");
       setIsDeleteOpen(false);
       fetchData();
     } catch (err) {
       toast.error(
-        err.response?.data?.message || "Erreur lors de la suppression"
+        err.response?.data?.message || "Erreur lors de la suppression",
       );
     }
   };
 
-  // --- LOGIQUE DE FILTRAGE ---
   const { filteredData, stats } = useMemo(() => {
     let currentDataSource = historiqueCaisse;
     if (activeTab === "agents") currentDataSource = versementsAgent;
@@ -222,12 +209,12 @@ const Caisse = () => {
       const itemDate = item.date
         ? new Date(item.date).toISOString().split("T")[0]
         : "";
+      const nomClient = item.idClient?.nom?.toLowerCase() || "";
       const matchesSearch =
         item.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.par?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.idClient?.nom?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        nomClient.includes(searchTerm.toLowerCase()) ||
         item.reference?.toLowerCase().includes(searchTerm.toLowerCase());
-
       const matchesDateDebut = dateDebut ? itemDate >= dateDebut : true;
       const matchesDateFin = dateFin ? itemDate <= dateFin : true;
       return matchesSearch && matchesDateDebut && matchesDateFin;
@@ -250,7 +237,7 @@ const Caisse = () => {
         }
         return acc;
       },
-      { debit: 0, credit: 0 }
+      { debit: 0, credit: 0 },
     );
 
     return { filteredData: filtered, stats: totals };
@@ -265,6 +252,9 @@ const Caisse = () => {
     dateDebut,
     dateFin,
   ]);
+
+  const isClientTab =
+    activeTab === "versements_client" || activeTab === "retraits_client";
 
   if (isLoading)
     return (
@@ -370,7 +360,7 @@ const Caisse = () => {
                 id: "retraits_client",
                 label: "Retraits Clients",
                 icon: <ArrowRightLeft size={14} />,
-              }, // Nouvel onglet
+              },
               {
                 id: "recharges",
                 label: "Recharges",
@@ -418,9 +408,9 @@ const Caisse = () => {
           </div>
         </div>
 
+        {/* ===== BILAN ===== */}
         {activeTab === "bilan" ? (
           <div className="space-y-8">
-            {/* Cartes de résumé rapide */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="bg-emerald-50 p-6 rounded-[2rem] border border-emerald-100">
                 <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">
@@ -452,11 +442,7 @@ const Caisse = () => {
                 </span>
                 <div className="flex items-baseline gap-2 mt-2">
                   <span
-                    className={`text-3xl font-black ${
-                      stats.credit - stats.debit >= 0
-                        ? "text-green-400"
-                        : "text-red-400"
-                    }`}
+                    className={`text-3xl font-black ${stats.credit - stats.debit >= 0 ? "text-green-400" : "text-red-400"}`}
                   >
                     {(stats.credit - stats.debit).toLocaleString()}
                   </span>
@@ -465,7 +451,6 @@ const Caisse = () => {
               </div>
             </div>
 
-            {/* Tableau des mouvements */}
             <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden">
               <div className="p-6 border-b border-slate-50 bg-slate-50/50">
                 <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500">
@@ -554,108 +539,143 @@ const Caisse = () => {
             </div>
           </div>
         ) : (
+          /* ===== TABLEAU PRINCIPAL ===== */
           <div className="overflow-x-auto max-h-150 overflow-y-auto">
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 tracking-widest">
                   <th className="px-6 py-4">Date & Heure</th>
                   <th className="px-6 py-4">
-                    {activeTab === "historique"
-                      ? "Description"
-                      : activeTab === "versements_client" ||
-                        activeTab === "retraits_client"
+                    {isClientTab
                       ? "Client"
-                      : "Agent / Motif"}
+                      : activeTab === "historique"
+                        ? "Description"
+                        : "Agent / Motif"}
                   </th>
+                  {/* ✅ Colonne Description uniquement sur onglets clients */}
+                  {isClientTab && <th className="px-6 py-4">Description</th>}
                   <th className="px-6 py-4">Montant</th>
-                  <th className="px-6 py-4">Auteur / Cat.</th>
+                  <th className="px-6 py-4">
+                    {isClientTab ? "Enregistré par" : "Auteur / Cat."}
+                  </th>
                   <th className="px-6 py-4">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filteredData.map((item, idx) => {
-                  const isDebit =
-                    item.typeOperation === "Debit" ||
-                    item.typeOperation === "Retrait" ||
-                    activeTab === "agents" ||
-                    activeTab === "retraits_client";
-                  return (
-                    <tr
-                      key={idx}
-                      className="hover:bg-slate-50/50 transition-colors group"
+                {filteredData.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={isClientTab ? 6 : 5}
+                      className="px-6 py-16 text-center text-[11px] font-black text-slate-300 uppercase tracking-widest"
                     >
-                      <td className="px-6 py-4">
-                        <div className="text-[11px] font-bold text-slate-900">
-                          {new Date(item.date).toLocaleDateString()}
-                        </div>
-                        <div className="text-[9px] text-slate-400 font-medium">
-                          {new Date(item.date).toLocaleTimeString()}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-[11px] font-bold text-slate-600">
-                        {activeTab === "versements_client" ||
-                        activeTab === "retraits_client"
-                          ? item.idClient?.nom || "Client"
-                          : item.description || item.idUser?.nom || "N/A"}
-                      </td>
-                      <td
-                        className={`px-6 py-4 text-[11px] font-black ${
-                          isDebit ? "text-red-500" : "text-emerald-600"
-                        }`}
+                      Aucune donnée à afficher
+                    </td>
+                  </tr>
+                ) : (
+                  filteredData.map((item, idx) => {
+                    const isDebit =
+                      item.typeOperation === "Debit" ||
+                      item.typeOperation === "Retrait" ||
+                      activeTab === "agents" ||
+                      activeTab === "retraits_client";
+
+                    return (
+                      <tr
+                        key={idx}
+                        className="hover:bg-slate-50/50 transition-colors group"
                       >
-                        {isDebit ? "-" : "+"} {item.montant?.toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase">
-                        {item.par || item.categorie || "Système"}
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex gap-2">
-                          {(activeTab === "versements_client" ||
-                            activeTab === "retraits_client") && (
-                            <button
-                              onClick={() =>
-                                handlePrint(
-                                  item,
-                                  activeTab === "retraits_client"
-                                    ? "retrait"
-                                    : "versement"
-                                )
-                              }
-                              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg"
-                            >
-                              <Printer size={14} />
-                            </button>
-                          )}
-                          {activeTab !== "historique" && (
-                            <>
+                        {/* DATE */}
+                        <td className="px-6 py-4">
+                          <div className="text-[11px] font-bold text-slate-900">
+                            {new Date(item.date).toLocaleDateString()}
+                          </div>
+                          <div className="text-[9px] text-slate-400 font-medium">
+                            {new Date(item.date).toLocaleTimeString()}
+                          </div>
+                        </td>
+
+                        {/* ✅ CLIENT ou Description/Agent selon onglet */}
+                        <td className="px-6 py-4 text-[11px] font-bold text-slate-700 uppercase">
+                          {isClientTab
+                            ? (item.idClient?.nom ?? "—")
+                            : item.description || item.idUser?.nom || "N/A"}
+                        </td>
+
+                        {/* ✅ DESCRIPTION — cellule présente SEULEMENT sur onglets clients */}
+                        {isClientTab && (
+                          <td className="px-6 py-4 text-[11px] text-slate-500 font-medium italic max-w-[220px] truncate">
+                            {item.description || (
+                              <span className="text-slate-300 not-italic">
+                                —
+                              </span>
+                            )}
+                          </td>
+                        )}
+
+                        {/* MONTANT */}
+                        <td
+                          className={`px-6 py-4 text-[11px] font-black ${isDebit ? "text-red-500" : "text-emerald-600"}`}
+                        >
+                          {isDebit ? "−" : "+"} {item.montant?.toLocaleString()}
+                        </td>
+
+                        {/* ✅ AUTEUR */}
+                        <td className="px-6 py-4 text-[11px] font-bold text-slate-500 uppercase">
+                          {isClientTab
+                            ? (item.idUser?.nom ?? "—")
+                            : item.par || item.categorie || "Système"}
+                        </td>
+
+                        {/* ACTIONS */}
+                        <td className="px-6 py-4">
+                          <div className="flex gap-2 items-center">
+                            {isClientTab && (
                               <button
-                                onClick={() => openEditModal(item)}
-                                className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg"
+                                onClick={() =>
+                                  handlePrint(
+                                    item,
+                                    activeTab === "retraits_client"
+                                      ? "retrait"
+                                      : "versement",
+                                  )
+                                }
+                                className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                                title="Imprimer le bordereau"
                               >
-                                <Edit2 size={14} />
+                                <Printer size={14} />
                               </button>
-                              <button
-                                onClick={() => openDeleteModal(item)}
-                                className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                            )}
+                            {activeTab !== "historique" && (
+                              <>
+                                <button
+                                  onClick={() => openEditModal(item)}
+                                  className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="Modifier"
+                                >
+                                  <Edit2 size={14} />
+                                </button>
+                                <button
+                                  onClick={() => openDeleteModal(item)}
+                                  className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Supprimer"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
-      {/* --- TOUTES LES MODALS --- */}
-
-      {/* Versement Client */}
+      {/* ===== MODALS ===== */}
       <Modal
         isOpen={isDepositOpen}
         onClose={() => setIsDepositOpen(false)}
@@ -667,7 +687,6 @@ const Caisse = () => {
         />
       </Modal>
 
-      {/* Retrait Client (NOUVEAU) */}
       <Modal
         isOpen={isRetraitOpen}
         onClose={() => setIsRetraitOpen(false)}
@@ -679,7 +698,6 @@ const Caisse = () => {
         />
       </Modal>
 
-      {/* Recharge Caisse */}
       <Modal
         isOpen={isRechargeOpen}
         onClose={() => setIsRechargeOpen(false)}
@@ -691,7 +709,6 @@ const Caisse = () => {
         />
       </Modal>
 
-      {/* Edit Versement Client */}
       <Modal
         isOpen={isEditClientOpen}
         onClose={() => setIsEditClientOpen(false)}
@@ -704,7 +721,6 @@ const Caisse = () => {
         />
       </Modal>
 
-      {/* Edit Retrait Client (NOUVEAU) */}
       <Modal
         isOpen={isEditRetraitOpen}
         onClose={() => setIsEditRetraitOpen(false)}
@@ -717,7 +733,6 @@ const Caisse = () => {
         />
       </Modal>
 
-      {/* Edit Standard (Recharge / Agents) */}
       <Modal
         isOpen={isEditOpen}
         onClose={() => setIsEditOpen(false)}
@@ -759,7 +774,6 @@ const Caisse = () => {
         </form>
       </Modal>
 
-      {/* Delete Confirmation */}
       <Modal
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
