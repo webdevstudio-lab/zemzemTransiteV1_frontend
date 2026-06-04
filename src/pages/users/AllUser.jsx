@@ -2,8 +2,6 @@ import React, { useState, useMemo, useEffect } from "react";
 import {
   Search,
   UserPlus,
-  ChevronLeft,
-  ChevronRight,
   Users as UsersIcon,
   ShieldAlert,
   Edit2,
@@ -39,8 +37,6 @@ const AllUsers = () => {
     key: "nom",
     direction: "asc",
   });
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
 
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -51,6 +47,7 @@ const AllUsers = () => {
   const [isRechargeOpen, setIsRechargeOpen] = useState(false);
   const [isRetraitOpen, setIsRetraitOpen] = useState(false);
   const [transactionAmount, setTransactionAmount] = useState("");
+  const [transactionDetail, setTransactionDetail] = useState("");
 
   const ROLE_STYLES = {
     admin: "bg-slate-900 text-white border-slate-900",
@@ -82,7 +79,7 @@ const AllUsers = () => {
 
   const getCurrentAdminName = () => {
     const userData = JSON.parse(
-      localStorage.getItem("_appTransit_user") || "{}"
+      localStorage.getItem("_appTransit_user") || "{}",
     );
     return `${userData.nom} ${userData.prenoms}`.trim() || "Admin";
   };
@@ -100,7 +97,11 @@ const AllUsers = () => {
       montant: amount,
       idUser: selectedUser._id,
       par: getCurrentAdminName(),
-      ...(!isRecharge && { description: "Retour surplus fin de mission" }),
+      description:
+        transactionDetail.trim() ||
+        (isRecharge
+          ? "Rechargement compte agent"
+          : "Retour surplus fin de mission"),
     };
 
     try {
@@ -109,6 +110,7 @@ const AllUsers = () => {
       setIsRechargeOpen(false);
       setIsRetraitOpen(false);
       setTransactionAmount("");
+      setTransactionDetail("");
       fetchUsers();
     } catch (err) {
       toast.error(err.message || "Erreur lors de l'opération");
@@ -119,7 +121,7 @@ const AllUsers = () => {
     if (!selectedUser) return;
     try {
       await API.delete(
-        API_PATHS.USERS.DELETE_USER.replace(":id", selectedUser._id)
+        API_PATHS.USERS.DELETE_USER.replace(":id", selectedUser._id),
       );
       toast.success("Utilisateur supprimé");
       setIsDeleteOpen(false);
@@ -135,7 +137,7 @@ const AllUsers = () => {
       result = result.filter(
         (u) =>
           u.nom?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          u.prenoms?.toLowerCase().includes(searchTerm.toLowerCase())
+          u.prenoms?.toLowerCase().includes(searchTerm.toLowerCase()),
       );
     }
     result.sort((a, b) => {
@@ -153,11 +155,6 @@ const AllUsers = () => {
     });
     return result;
   }, [users, searchTerm, sortConfig]);
-
-  const currentUsers = processedUsers.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  );
 
   if (isLoading)
     return (
@@ -207,135 +204,137 @@ const AllUsers = () => {
       </div>
 
       {/* TABLEAU */}
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden overflow-x-auto">
-        <table className="w-full text-left">
-          <thead>
-            <tr className="bg-slate-50/50 border-b border-slate-100 text-[10px] font-black uppercase text-slate-500 tracking-widest">
-              <th className="px-6 py-5">Utilisateur</th>
-              <th className="px-6 py-5">Rôle</th>
-              <th className="px-6 py-5">Solde MRU</th>
-              <th className="px-6 py-5">Restriction</th>
-              <th className="px-6 py-5">Gestion Fonds</th>
-              <th className="px-6 py-5 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-50">
-            {currentUsers.map((u) => (
-              <tr
-                key={u._id}
-                className="hover:bg-red-50/10 transition-colors group"
-              >
-                <td
-                  className="px-6 py-4"
-                  onClick={() => navigate(`/users/id=${u._id}`)}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center font-black text-white text-[10px] uppercase">
-                      {u.nom?.[0]}
-                      {u.prenoms?.[0]}
-                    </div>
-                    <div className="text-sm font-black text-slate-900 uppercase group-hover:text-[#EF233C] transition-colors">
-                      {u.nom} {u.prenoms}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-6 py-4">
-                  <span
-                    className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase border ${
-                      ROLE_STYLES[u.role] || ROLE_STYLES.client
-                    }`}
-                  >
-                    {u.role || "Client"}
-                  </span>
-                </td>
-                <td className="px-6 py-4 font-black text-sm">
-                  <span
-                    className={
-                      (u.compte?.montant || 0) < 0
-                        ? "text-[#EF233C]"
-                        : "text-emerald-600"
-                    }
-                  >
-                    {new Intl.NumberFormat("fr-FR").format(
-                      u.compte?.montant || 0
-                    )}
-                  </span>
-                </td>
-                <td className="px-6 py-4">
-                  {u.restriction ? (
-                    <div className="inline-flex items-center gap-1.5 text-orange-600 bg-orange-50 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase">
-                      <ShieldAlert size={12} /> Bloqué
-                    </div>
-                  ) : (
-                    <div className="inline-flex items-center gap-1.5 text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase">
-                      <ShieldCheck size={12} /> Actif
-                    </div>
-                  )}
-                </td>
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedUser(u);
-                        setIsRechargeOpen(true);
-                      }}
-                      className="p-2 text-slate-500 flex items-center gap-2 text-xs rounded-lg hover:underline hover:text-[#EF233C] transition-all active:scale-90"
-                    >
-                      <ArrowDownCircle size={18} /> Recharge
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedUser(u);
-                        setIsRetraitOpen(true);
-                      }}
-                      className="p-2 text-slate-500 flex items-center gap-2 text-xs rounded-lg hover:underline hover:text-green-600 transition-all active:scale-90"
-                    >
-                      <ArrowUpCircle size={18} /> Retrait
-                    </button>
-                  </div>
-                </td>
-                <td className="px-6 py-4 text-right relative">
-                  {isAdmin && (
-                    <button
-                      onClick={() =>
-                        setActiveMenu(activeMenu === u._id ? null : u._id)
-                      }
-                      className="p-2 hover:bg-slate-100 rounded-lg text-slate-400"
-                    >
-                      <MoreVertical size={18} />
-                    </button>
-                  )}
-                  {activeMenu === u._id && (
-                    <div className="absolute right-6 top-10 w-44 bg-white border border-slate-200 rounded-xl py-2 shadow-2xl z-50">
-                      <button
-                        onClick={() => {
-                          setSelectedUser(u);
-                          setIsUpdateOpen(true);
-                          setActiveMenu(null);
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-[10px] font-black text-slate-700 hover:bg-slate-50 uppercase"
-                      >
-                        <Edit2 size={14} /> Modifier
-                      </button>
-                      <button
-                        onClick={() => {
-                          setSelectedUser(u);
-                          setIsDeleteOpen(true);
-                          setActiveMenu(null);
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-2.5 text-[10px] font-black text-[#EF233C] hover:bg-red-50 uppercase"
-                      >
-                        <Trash2 size={14} /> Supprimer
-                      </button>
-                    </div>
-                  )}
-                </td>
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        <div className="overflow-x-auto max-h-[640px] overflow-y-auto">
+          <table className="w-full text-left">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-slate-50/50 border-b border-slate-100 text-[10px] font-black uppercase text-slate-500 tracking-widest">
+                <th className="px-6 py-5">Utilisateur</th>
+                <th className="px-6 py-5">Rôle</th>
+                <th className="px-6 py-5">Solde MRU</th>
+                <th className="px-6 py-5">Restriction</th>
+                <th className="px-6 py-5">Gestion Fonds</th>
+                <th className="px-6 py-5 text-right">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {processedUsers.map((u) => (
+                <tr
+                  key={u._id}
+                  className="hover:bg-red-50/10 transition-colors group"
+                >
+                  <td
+                    className="px-6 py-4"
+                    onClick={() => navigate(`/users/id=${u._id}`)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center font-black text-white text-[10px] uppercase">
+                        {u.nom?.[0]}
+                        {u.prenoms?.[0]}
+                      </div>
+                      <div className="text-sm font-black text-slate-900 uppercase group-hover:text-[#EF233C] transition-colors">
+                        {u.nom} {u.prenoms}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span
+                      className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase border ${
+                        ROLE_STYLES[u.role] || ROLE_STYLES.client
+                      }`}
+                    >
+                      {u.role || "Client"}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 font-black text-sm">
+                    <span
+                      className={
+                        (u.compte?.montant || 0) < 0
+                          ? "text-[#EF233C]"
+                          : "text-emerald-600"
+                      }
+                    >
+                      {new Intl.NumberFormat("fr-FR").format(
+                        u.compte?.montant || 0,
+                      )}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    {u.restriction ? (
+                      <div className="inline-flex items-center gap-1.5 text-orange-600 bg-orange-50 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase">
+                        <ShieldAlert size={12} /> Bloqué
+                      </div>
+                    ) : (
+                      <div className="inline-flex items-center gap-1.5 text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase">
+                        <ShieldCheck size={12} /> Actif
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedUser(u);
+                          setIsRechargeOpen(true);
+                        }}
+                        className="p-2 text-slate-500 flex items-center gap-2 text-xs rounded-lg hover:underline hover:text-[#EF233C] transition-all active:scale-90"
+                      >
+                        <ArrowDownCircle size={18} /> Recharge
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedUser(u);
+                          setIsRetraitOpen(true);
+                        }}
+                        className="p-2 text-slate-500 flex items-center gap-2 text-xs rounded-lg hover:underline hover:text-green-600 transition-all active:scale-90"
+                      >
+                        <ArrowUpCircle size={18} /> Retrait
+                      </button>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-right relative">
+                    {isAdmin && (
+                      <button
+                        onClick={() =>
+                          setActiveMenu(activeMenu === u._id ? null : u._id)
+                        }
+                        className="p-2 hover:bg-slate-100 rounded-lg text-slate-400"
+                      >
+                        <MoreVertical size={18} />
+                      </button>
+                    )}
+                    {activeMenu === u._id && (
+                      <div className="absolute right-6 top-10 w-44 bg-white border border-slate-200 rounded-xl py-2 shadow-2xl z-50">
+                        <button
+                          onClick={() => {
+                            setSelectedUser(u);
+                            setIsUpdateOpen(true);
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-[10px] font-black text-slate-700 hover:bg-slate-50 uppercase"
+                        >
+                          <Edit2 size={14} /> Modifier
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedUser(u);
+                            setIsDeleteOpen(true);
+                            setActiveMenu(null);
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-[10px] font-black text-[#EF233C] hover:bg-red-50 uppercase"
+                        >
+                          <Trash2 size={14} /> Supprimer
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* MODAL RECHARGE AVEC SOLDE AGENT */}
@@ -395,6 +394,18 @@ const AllUsers = () => {
               />
             </div>
           </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-500 uppercase ml-1">
+              Détail / Motif
+            </label>
+            <input
+              type="text"
+              value={transactionDetail}
+              onChange={(e) => setTransactionDetail(e.target.value)}
+              placeholder="Ex: Dotation mission Nouakchott..."
+              className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl font-bold text-sm focus:border-slate-900 outline-none"
+            />
+          </div>
           <button
             onClick={() => handleTransaction("recharge")}
             className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-black transition-all shadow-xl"
@@ -440,6 +451,18 @@ const AllUsers = () => {
               ).toLocaleString()}{" "}
               MRU
             </p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-500 uppercase ml-1">
+              Détail / Motif
+            </label>
+            <input
+              type="text"
+              value={transactionDetail}
+              onChange={(e) => setTransactionDetail(e.target.value)}
+              placeholder="Ex: Retour surplus fin de mission..."
+              className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-xl font-bold text-sm focus:border-[#EF233C] outline-none"
+            />
           </div>
           <button
             onClick={() => handleTransaction("retrait")}
@@ -508,7 +531,7 @@ const AllUsers = () => {
           onSubmit={async (data) => {
             await API.patch(
               API_PATHS.USERS.UPDATE_USER.replace(":id", selectedUser._id),
-              data
+              data,
             );
             fetchUsers();
             setIsUpdateOpen(false);

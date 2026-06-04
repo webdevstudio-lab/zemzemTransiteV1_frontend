@@ -594,11 +594,30 @@ const Caisse = () => {
                           </div>
                         </td>
 
-                        {/* ✅ CLIENT ou Description/Agent selon onglet */}
-                        <td className="px-6 py-4 text-[11px] font-bold text-slate-700 uppercase">
-                          {isClientTab
-                            ? (item.idClient?.nom ?? "—")
-                            : item.description || item.idUser?.nom || "N/A"}
+                        {/* ✅ CLIENT ou Agent+Motif selon onglet */}
+                        <td className="px-6 py-4">
+                          {isClientTab ? (
+                            <span className="text-[11px] font-bold text-slate-700 uppercase">
+                              {item.idClient?.nom ?? "—"}
+                            </span>
+                          ) : activeTab === "agents" ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[11px] font-black text-slate-800 uppercase">
+                                {item.idUser?.nom
+                                  ? `${item.idUser.nom}${item.idUser.prenoms ? " " + item.idUser.prenoms : ""}`
+                                  : item.par || "—"}
+                              </span>
+                              {item.description && (
+                                <span className="text-[10px] font-bold text-red-500 normal-case">
+                                  ↳ {item.description}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] font-bold text-slate-700 uppercase">
+                              {item.description || "—"}
+                            </span>
+                          )}
                         </td>
 
                         {/* ✅ DESCRIPTION — cellule présente SEULEMENT sur onglets clients */}

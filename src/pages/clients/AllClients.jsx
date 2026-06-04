@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Search,
   UserPlus,
@@ -16,7 +16,7 @@ import {
   TrendingDown,
   CheckCircle,
 } from "lucide-react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import * as XLSX from "xlsx";
 import Modal from "../../components/ui/Modal";
@@ -74,20 +74,13 @@ const TABS = [
 
 const AllClients = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  // Ref pour ignorer le premier render dans le useEffect de persistance
-  const isMounted = useRef(false);
-
-  // Lecture du state AVANT l'initialisation des useState
-  const savedState = location.state;
-
   const [clients, setClients] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState(savedState?.searchTerm ?? "");
-  const [activeTab, setActiveTab] = useState(savedState?.activeTab ?? "tous");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activeTab, setActiveTab] = useState("tous");
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isUpdateOpen, setIsUpdateOpen] = useState(false);
@@ -114,18 +107,6 @@ const AllClients = () => {
     window.addEventListener("click", handleClickOutside);
     return () => window.removeEventListener("click", handleClickOutside);
   }, []);
-
-  // --- PERSISTANCE : on saute le premier render pour ne pas écraser le state restauré ---
-  useEffect(() => {
-    if (!isMounted.current) {
-      isMounted.current = true;
-      return;
-    }
-    navigate(location.pathname, {
-      replace: true,
-      state: { activeTab, searchTerm },
-    });
-  }, [activeTab, searchTerm]);
 
   // --- NAVIGATION VERS UN CLIENT ---
   const handleRowClick = (client) => {

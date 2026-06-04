@@ -42,6 +42,7 @@ const ClientDetails = () => {
   const [extraServices, setExtraServices] = useState([]);
   const [bls, setBls] = useState([]);
   const [versementsClient, setVersementsClient] = useState([]);
+  const [retraitsClient, setRetraitsClient] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState("historique");
@@ -75,22 +76,30 @@ const ClientDetails = () => {
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const [resClient, resTrans, resExtra, resBls, resVersements] =
-        await Promise.all([
-          API.get(API_PATHS.CLIENTS.GET_ONE_CLIENT.replace(":id", cleanId)),
-          API.get(
-            API_PATHS.HISTORIQUE.CLIENTS_BY_ID.replace(":id_client", cleanId),
+      const [
+        resClient,
+        resTrans,
+        resExtra,
+        resBls,
+        resVersements,
+        resRetraits,
+      ] = await Promise.all([
+        API.get(API_PATHS.CLIENTS.GET_ONE_CLIENT.replace(":id", cleanId)),
+        API.get(
+          API_PATHS.HISTORIQUE.CLIENTS_BY_ID.replace(":id_client", cleanId),
+        ),
+        API.get(
+          API_PATHS.FACTURATION.GET_ALL_FACTURATION_BY_CLIENT.replace(
+            ":id_client",
+            cleanId,
           ),
-          API.get(
-            API_PATHS.FACTURATION.GET_ALL_FACTURATION_BY_CLIENT.replace(
-              ":id_client",
-              cleanId,
-            ),
-          ),
-          API.get(`${API_PATHS.BLS.GET_ALL_BL_BY_CLIENT}/${cleanId}`),
-          // ── Vrais versements du client pour récupérer leur description réelle ──
-          API.get(`/versements-client/client/${cleanId}`),
-        ]);
+        ),
+        API.get(`${API_PATHS.BLS.GET_ALL_BL_BY_CLIENT}/${cleanId}`),
+        // ── Vrais versements du client pour récupérer leur description réelle ──
+        API.get(`/versements-client/client/${cleanId}`),
+        // ── Retraits du client pour enrichir le bilan ──
+        API.get(`/retrait-client/client/${cleanId}`),
+      ]);
       setClient(resClient.data.data);
       setTransactions(resTrans.data.data || []);
       const facturesRecues = resExtra.data.data;
@@ -98,6 +107,8 @@ const ClientDetails = () => {
       setBls(resBls.data.data || []);
       const rawVersements = resVersements.data?.data ?? resVersements.data;
       setVersementsClient(Array.isArray(rawVersements) ? rawVersements : []);
+      const rawRetraits = resRetraits?.data?.data ?? resRetraits?.data ?? [];
+      setRetraitsClient(Array.isArray(rawRetraits) ? rawRetraits : []);
     } catch (err) {
       toast.error(err.message || "Erreur lors du chargement des données");
     } finally {
@@ -134,6 +145,21 @@ const ClientDetails = () => {
     });
     return map;
   }, [versementsClient]);
+
+  // ── Extrait la référence RET-XXXX-XXXXXX depuis une description (retrait) ──
+  const extractRetraitReference = (description = "") => {
+    const match = description.match(/RET-[0-9]{4}-[0-9]{6}/i);
+    return match ? match[0].toUpperCase() : null;
+  };
+
+  // ── Map référence retrait → objet retrait complet ──
+  const retraitsMap = useMemo(() => {
+    const map = {};
+    retraitsClient.forEach((r) => {
+      if (r.reference) map[r.reference.toUpperCase()] = r;
+    });
+    return map;
+  }, [retraitsClient]);
 
   // ── Extrait la référence VERS-XXXX-XXXXXX depuis une description ──
   const extractReference = (description = "") => {
@@ -234,13 +260,47 @@ const ClientDetails = () => {
 
   // ── HELPER : cellule Désignation dans le bilan (UI web) ──
   const getDesignationLabel = (t) => {
-    const ref = extractReference(t.description);
-    const vraiDescription = ref ? versementsDescMap[ref] : null;
+    const retRef = extractRetraitReference(t.description);
+    const versRef = extractReference(t.description);
 
-    if (t.type === "Versement" && ref) {
+    // ── RETRAIT ──
+    if (t.type === "Retrait") {
+      const retrait = retRef ? retraitsMap[retRef] : null;
+      const detail = retrait?.description || null;
       return (
         <div className="flex flex-col gap-0.5">
-          <span className="text-xs font-black text-slate-700 uppercase">
+          <span className="text-xs font-black text-slate-800 uppercase tracking-tight">
+            Retrait effectué - Réf: {retRef || "—"}
+          </span>
+          {detail && (
+            <span className="text-[10px] font-bold text-red-500 normal-case">
+              ↳ {detail}
+            </span>
+          )}
+        </div>
+      );
+    }
+
+    // ── ANNULATION RETRAIT ──
+    if (t.type === "Annulation Retrait") {
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs font-black text-slate-800 uppercase tracking-tight">
+            Annulation Retrait{retRef ? ` - Réf: ${retRef}` : ""}
+          </span>
+          <span className="text-[10px] font-bold text-red-500 normal-case">
+            ↳ Montant restitué au client
+          </span>
+        </div>
+      );
+    }
+
+    // ── VERSEMENT ──
+    if (t.type === "Versement") {
+      const vraiDescription = versRef ? versementsDescMap[versRef] : null;
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs font-black text-slate-800 uppercase tracking-tight">
             {t.description}
           </span>
           {vraiDescription && (
@@ -252,6 +312,21 @@ const ClientDetails = () => {
       );
     }
 
+    // ── ANNULATION VERSEMENT ──
+    if (t.type === "Annulation Versement") {
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs font-black text-slate-800 uppercase tracking-tight">
+            {t.description}
+          </span>
+          <span className="text-[10px] font-bold text-red-500 normal-case">
+            ↳ Versement annulé
+          </span>
+        </div>
+      );
+    }
+
+    // ── Fallback (anciens enregistrements sans type) ──
     return (
       <span className="text-xs font-black text-slate-700 uppercase">
         {t.description || (
@@ -261,12 +336,28 @@ const ClientDetails = () => {
     );
   };
 
-  // ── HELPER : libellé Excel (versement → ref + description) ──
+  // ── HELPER : libellé Excel ──
   const getDesignationExcel = (t) => {
-    const ref = extractReference(t.description);
-    const vraiDescription = ref ? versementsDescMap[ref] : null;
-    if (t.type === "Versement" && vraiDescription) {
-      return `${t.description} — ${vraiDescription}`;
+    const retRef = extractRetraitReference(t.description);
+    const versRef = extractReference(t.description);
+
+    if (t.type === "Retrait") {
+      const retrait = retRef ? retraitsMap[retRef] : null;
+      let label = `Retrait effectué - Réf: ${retRef || "—"}`;
+      if (retrait?.description) label += ` / ${retrait.description}`;
+      return label;
+    }
+    if (t.type === "Annulation Retrait") {
+      return `Annulation Retrait${retRef ? ` - Réf: ${retRef}` : ""} (Montant restitué)`;
+    }
+    if (t.type === "Versement") {
+      const vraiDescription = versRef ? versementsDescMap[versRef] : null;
+      return vraiDescription
+        ? `${t.description} — ${vraiDescription}`
+        : t.description || "—";
+    }
+    if (t.type === "Annulation Versement") {
+      return `${t.description} (Versement annulé)`;
     }
     return t.description || "—";
   };
@@ -1030,6 +1121,40 @@ const ClientDetails = () => {
                           const isCredit = t.typeOperation
                             ?.toLowerCase()
                             .includes("credit");
+
+                          // Badge couleur selon le type d'opération
+                          const BADGE_MAP = {
+                            Versement: {
+                              label: "Versement",
+                              cls: "bg-emerald-100 text-emerald-700 border-emerald-200",
+                            },
+                            "Annulation Versement": {
+                              label: "Annul. Versement",
+                              cls: "bg-orange-100  text-orange-700  border-orange-200",
+                            },
+                            Retrait: {
+                              label: "Retrait",
+                              cls: "bg-red-100    text-red-700    border-red-200",
+                            },
+                            "Annulation Retrait": {
+                              label: "Annul. Retrait",
+                              cls: "bg-amber-100  text-amber-700  border-amber-200",
+                            },
+                            Facturation: {
+                              label: "Facturation",
+                              cls: "bg-blue-100   text-blue-700   border-blue-200",
+                            },
+                            "Facturation Extra": {
+                              label: "Fact. Extra",
+                              cls: "bg-blue-100   text-blue-700   border-blue-200",
+                            },
+                            Remboursement: {
+                              label: "Remboursement",
+                              cls: "bg-purple-100 text-purple-700 border-purple-200",
+                            },
+                          };
+                          const typeBadge = BADGE_MAP[t.type] || null;
+
                           return (
                             <tr
                               key={t._id}
@@ -1039,17 +1164,34 @@ const ClientDetails = () => {
                                 {new Date(t.date).toLocaleDateString()}
                               </td>
                               <td className="px-8 py-4">
-                                {getDesignationLabel(t)}
+                                <div className="flex flex-col gap-1">
+                                  {typeBadge && (
+                                    <span
+                                      className={`self-start px-2 py-0.5 rounded-md text-[9px] font-black uppercase border ${typeBadge.cls}`}
+                                    >
+                                      {typeBadge.label}
+                                    </span>
+                                  )}
+                                  {getDesignationLabel(t)}
+                                </div>
                               </td>
                               <td className="px-8 py-4 text-right font-black text-red-500">
-                                {!isCredit
-                                  ? t.montant.toLocaleString("fr-FR")
-                                  : "-"}
+                                {!isCredit ? (
+                                  t.montant.toLocaleString("fr-FR")
+                                ) : (
+                                  <span className="text-slate-300 font-bold">
+                                    —
+                                  </span>
+                                )}
                               </td>
                               <td className="px-8 py-4 text-right font-black text-emerald-500">
-                                {isCredit
-                                  ? t.montant.toLocaleString("fr-FR")
-                                  : "-"}
+                                {isCredit ? (
+                                  t.montant.toLocaleString("fr-FR")
+                                ) : (
+                                  <span className="text-slate-300 font-bold">
+                                    —
+                                  </span>
+                                )}
                               </td>
                             </tr>
                           );
