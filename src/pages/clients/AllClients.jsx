@@ -26,7 +26,6 @@ import { useAuth } from "../../context/AuthContext";
 import CreateClientForm from "./CreateClientForm";
 import UpdateClientForm from "./UpdateClientForm";
 
-// --- DÉFINITION DES ONGLETS ---
 const TABS = [
   {
     key: "tous",
@@ -78,7 +77,6 @@ const AllClients = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  // --- ÉTATS ---
   const [clients, setClients] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -110,7 +108,12 @@ const AllClients = () => {
     return () => window.removeEventListener("click", handleClickOutside);
   }, []);
 
-  // --- CALCULS DES STATISTIQUES GLOBALES ---
+  // --- NAVIGATION VERS UN CLIENT ---
+  const handleRowClick = (client) => {
+    navigate(`/clients/${client._id}`);
+  };
+
+  // --- STATS GLOBALES ---
   const statsGlobales = useMemo(() => {
     return clients.reduce(
       (acc, client) => {
@@ -133,15 +136,13 @@ const AllClients = () => {
     [clients],
   );
 
-  // --- LOGIQUE D'EXPORT EXCEL ---
+  // --- EXPORT EXCEL ---
   const exportToExcel = () => {
     if (filteredClients.length === 0) {
       toast.error("Aucune donnée à exporter");
       return;
     }
-
     const tabLabel = TABS.find((t) => t.key === activeTab)?.label || "Clients";
-
     const dataToExport = filteredClients.map((c) => ({
       "Nom du Client": c.nom?.toUpperCase(),
       "Code Client": c.codeClient,
@@ -152,11 +153,9 @@ const AllClients = () => {
       "Solde (MRU)": c.solde || 0,
       Statut: c.restriction ? "Restreint" : "Actif",
     }));
-
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, tabLabel);
-
     XLSX.writeFile(
       workbook,
       `${tabLabel.replace(/ /g, "_")}_${new Date().toISOString().split("T")[0]}.xlsx`,
@@ -164,7 +163,7 @@ const AllClients = () => {
     toast.success("Export Excel réussi");
   };
 
-  // --- ACTIONS ---
+  // --- SUPPRESSION ---
   const handleDelete = async () => {
     if (!selectedClient) return;
     try {
@@ -182,38 +181,28 @@ const AllClients = () => {
     }
   };
 
-  // --- FILTRES (onglet + recherche) ---
+  // --- FILTRES ---
   const filteredClients = useMemo(() => {
     let list = clients;
-
-    // Filtre par onglet
-    if (activeTab === "crediteur") {
+    if (activeTab === "crediteur")
       list = list.filter((c) => (c.solde || 0) > 0);
-    } else if (activeTab === "debiteur") {
+    else if (activeTab === "debiteur")
       list = list.filter((c) => (c.solde || 0) < 0);
-    } else if (activeTab === "regle") {
+    else if (activeTab === "regle")
       list = list.filter((c) => (c.solde || 0) === 0);
-    }
 
-    // Filtre par recherche
     const search = searchTerm.toLowerCase();
     if (search) {
-      list = list.filter((c) => {
-        const name = (c.nom || "").toLowerCase();
-        const contact = (c.contact || "").toLowerCase();
-        const codeClient = (c.codeClient || "").toLowerCase();
-        return (
-          name.includes(search) ||
-          contact.includes(search) ||
-          codeClient.includes(search)
-        );
-      });
+      list = list.filter(
+        (c) =>
+          (c.nom || "").toLowerCase().includes(search) ||
+          (c.contact || "").toLowerCase().includes(search) ||
+          (c.codeClient || "").toLowerCase().includes(search),
+      );
     }
-
     return list;
   }, [clients, searchTerm, activeTab]);
 
-  // --- COMPOSANTS INTERNES ---
   const StatusBadge = ({ restricted }) =>
     restricted ? (
       <span className="flex items-center gap-1.5 text-[10px] font-black uppercase text-red-500 bg-red-50 px-2 py-1 rounded-md border border-red-100">
@@ -258,15 +247,12 @@ const AllClients = () => {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-
-          {/* BOUTON EXPORT */}
           <button
             onClick={exportToExcel}
             className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-emerald-500/10 transition-all active:scale-95"
           >
             <Download size={18} /> Exporter
           </button>
-
           <button
             onClick={() => setIsCreateOpen(true)}
             className="bg-[#EF233C] hover:bg-[#D90429] text-white px-6 py-3 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-red-500/20 transition-all active:scale-95"
@@ -306,7 +292,7 @@ const AllClients = () => {
         </div>
       </div>
 
-      {/* ONGLETS DE FILTRAGE */}
+      {/* ONGLETS */}
       <div className="flex items-center gap-2 bg-slate-100/70 p-1.5 rounded-2xl w-fit overflow-x-auto">
         {TABS.map((tab) => {
           const Icon = tab.icon;
@@ -327,14 +313,11 @@ const AllClients = () => {
               <Icon size={14} />
               {tab.label}
               <span
-                className={`
-                  px-1.5 py-0.5 rounded-md text-[10px] font-black
-                  ${
-                    isActive
-                      ? `${tab.dot} text-white`
-                      : "bg-slate-200 text-slate-500"
-                  }
-                `}
+                className={`px-1.5 py-0.5 rounded-md text-[10px] font-black ${
+                  isActive
+                    ? `${tab.dot} text-white`
+                    : "bg-slate-200 text-slate-500"
+                }`}
               >
                 {tabCounts[tab.key]}
               </span>
@@ -343,7 +326,7 @@ const AllClients = () => {
         })}
       </div>
 
-      {/* TABLEAU AVEC OVERFLOW-Y */}
+      {/* TABLEAU */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         <div className="overflow-y-auto max-h-[500px] scrollbar-thin scrollbar-thumb-slate-200">
           <table className="w-full text-left border-collapse">
@@ -372,7 +355,7 @@ const AllClients = () => {
                 filteredClients.map((client) => (
                   <tr
                     key={client._id}
-                    onClick={() => navigate(`/clients/${client._id}`)}
+                    onClick={() => handleRowClick(client)}
                     className="hover:bg-slate-50/50 transition-colors cursor-pointer group"
                   >
                     <td className="px-6 py-5">
@@ -406,7 +389,7 @@ const AllClients = () => {
                     </td>
                     <td className="px-6 py-5 text-center">
                       <div className="flex items-center justify-center gap-1.5 text-sm font-bold text-slate-600">
-                        <FileText size={14} className="text-slate-300" />{" "}
+                        <FileText size={14} className="text-slate-300" />
                         {client.bls?.length || 0}
                       </div>
                     </td>

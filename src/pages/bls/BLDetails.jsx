@@ -285,6 +285,7 @@ const BLDetails = () => {
                   <User size={12} className="text-[#EF233C]" />{" "}
                   {bl.id_client?.nom}
                 </p>
+
                 <p className="text-[11px] md:text-[12px] font-bold text-slate-500 uppercase flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span className="flex items-center gap-1">
                     <Box size={10} /> {bl.nbrDeConteneur} Cont.
@@ -295,6 +296,16 @@ const BLDetails = () => {
                   <span className="text-[10px] bg-slate-50 px-2 py-0.5 rounded italic">
                     N° {bl.numDeConteneur}
                   </span>
+                  {/* ✅ NOUVEAU : Transporteur */}
+                  {bl.nomTransporteur &&
+                    bl.nomTransporteur !== "non renseigné" && (
+                      <>
+                        <span className="hidden xs:inline">|</span>
+                        <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded font-black">
+                          {bl.nomTransporteur}
+                        </span>
+                      </>
+                    )}
                 </p>
               </div>
             </div>

@@ -15,6 +15,11 @@ import {
   Trash2,
   Tag,
   X,
+  Download,
+  RefreshCw,
+  FileJson,
+  CheckCircle2,
+  PackageOpen,
 } from "lucide-react";
 import toast, { Toaster } from "react-hot-toast";
 import API from "../../utils/axiosInstance";
@@ -30,14 +35,19 @@ const SettingsPage = () => {
   const [resetLogs, setResetLogs] = useState([]);
   const [isResetting, setIsResetting] = useState(false);
 
-  // --- NOUVEAUX ÉTATS POUR DÉPENSES ---
+  // --- ÉTATS CATÉGORIES ---
   const [categories, setCategories] = useState([]);
   const [isCatModalOpen, setIsCatModalOpen] = useState(false);
-  const [editingCat, setEditingCat] = useState(null); // null pour ajout, {id, nom} pour modif
+  const [editingCat, setEditingCat] = useState(null);
   const [catName, setCatName] = useState("");
 
+  // --- ÉTATS SAUVEGARDE BASE DE DONNÉES ---
+  const [backupInfo, setBackupInfo] = useState(null);
+  const [isLoadingBackupInfo, setIsLoadingBackupInfo] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+
   const userDataLocal = JSON.parse(
-    localStorage.getItem("_appTransit_user") || "{}"
+    localStorage.getItem("_appTransit_user") || "{}",
   );
   const isAdmin = userDataLocal.role === "admin";
   const currentUserId = userDataLocal._id || userDataLocal.id;
@@ -107,6 +117,73 @@ const SettingsPage = () => {
     fetchData();
   }, []);
 
+  // --- CHARGEMENT DES INFOS DE SAUVEGARDE ---
+  const fetchBackupInfo = async () => {
+    try {
+      setIsLoadingBackupInfo(true);
+      const res = await API.get("/backup/info");
+      if (res.data.success) {
+        setBackupInfo(res.data.data);
+      }
+    } catch (err) {
+      toast.error("Impossible de récupérer les informations de la base.");
+    } finally {
+      setIsLoadingBackupInfo(false);
+    }
+  };
+
+  // Charge les infos quand on arrive sur l'onglet "database"
+  useEffect(() => {
+    if (activeTab === "database" && isAdmin && !backupInfo) {
+      fetchBackupInfo();
+    }
+  }, [activeTab]);
+
+  // --- TÉLÉCHARGEMENT DE LA SAUVEGARDE ---
+  const handleDownloadBackup = async () => {
+    try {
+      setIsDownloading(true);
+      toast.loading("Génération de la sauvegarde en cours...", {
+        id: "backup",
+      });
+
+      // Appel avec responseType blob pour récupérer le ZIP binaire
+      const response = await API.get("/backup/download", {
+        responseType: "blob",
+      });
+
+      // Récupère le nom du fichier depuis le header Content-Disposition
+      const disposition = response.headers["content-disposition"] || "";
+      const fileNameMatch = disposition.match(/filename="?([^"]+)"?/);
+      const fileName = fileNameMatch
+        ? fileNameMatch[1]
+        : `backup_zemzem_${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.zip`;
+
+      // Crée un lien temporaire pour déclencher le téléchargement
+      const url = window.URL.createObjectURL(
+        new Blob([response.data], { type: "application/zip" }),
+      );
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", fileName);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast.success(`Sauvegarde téléchargée : ${fileName}`, { id: "backup" });
+
+      // Rafraîchit les infos après la sauvegarde
+      fetchBackupInfo();
+    } catch (err) {
+      toast.error("Erreur lors du téléchargement de la sauvegarde.", {
+        id: "backup",
+      });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   // --- HANDLERS EXISTANTS ---
   const handleUpdateCompany = async (e) => {
     e.preventDefault();
@@ -114,7 +191,7 @@ const SettingsPage = () => {
     try {
       const response = await API.patch(
         API_PATHS.INITIALISATION.UPDATE,
-        companyData
+        companyData,
       );
       if (response.data.success) toast.success("Structure mise à jour !");
     } catch (err) {
@@ -134,7 +211,7 @@ const SettingsPage = () => {
       });
       if (response.data.success) {
         const currentUser = JSON.parse(
-          localStorage.getItem("_appTransit_user") || "{}"
+          localStorage.getItem("_appTransit_user") || "{}",
         );
         localStorage.setItem(
           "_appTransit_user",
@@ -142,7 +219,7 @@ const SettingsPage = () => {
             ...currentUser,
             nom: profileData.nom,
             prenoms: profileData.prenoms,
-          })
+          }),
         );
         toast.success("Profil mis à jour !");
         fetchData();
@@ -175,7 +252,7 @@ const SettingsPage = () => {
     }
   };
 
-  // --- NOUVEAUX HANDLERS : CATÉGORIES ---
+  // --- HANDLERS CATÉGORIES ---
   const handleSaveCategory = async (e) => {
     e.preventDefault();
     if (!catName) return toast.error("Le nom est requis");
@@ -184,7 +261,7 @@ const SettingsPage = () => {
       if (editingCat) {
         const url = API_PATHS.CATDEPENSE.UPDATE_CATDEPENSE.replace(
           ":id",
-          editingCat._id
+          editingCat._id,
         );
         await API.patch(url, { nom: catName });
         toast.success("Catégorie modifiée");
@@ -305,7 +382,7 @@ const SettingsPage = () => {
         </header>
 
         {/* NAVIGATION TABS */}
-        <div className="flex gap-8 border-b border-slate-200 px-4">
+        <div className="flex gap-8 border-b border-slate-200 px-4 overflow-x-auto scrollbar-hide">
           {isAdmin && (
             <>
               <TabButton
@@ -319,6 +396,13 @@ const SettingsPage = () => {
                 onClick={() => setActiveTab("depense")}
                 label="Dépense"
                 icon={<Wallet size={16} />}
+              />
+              {/* ── NOUVEL ONGLET BASE DE DONNÉES ── */}
+              <TabButton
+                active={activeTab === "database"}
+                onClick={() => setActiveTab("database")}
+                label="Base de données"
+                icon={<HardDrive size={16} />}
               />
             </>
           )}
@@ -424,7 +508,7 @@ const SettingsPage = () => {
               </section>
             )}
 
-            {/* NOUVEAU TAB DÉPENSE (CATÉGORIES) */}
+            {/* TAB DÉPENSE (CATÉGORIES) */}
             {activeTab === "depense" && isAdmin && (
               <section className="bg-white rounded-[2rem] p-8 border border-slate-100 shadow-xl space-y-8 animate-fadeIn">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -490,6 +574,201 @@ const SettingsPage = () => {
                   )}
                 </div>
               </section>
+            )}
+
+            {/* ══════════════════════════════════════════════
+                NOUVEL ONGLET : BASE DE DONNÉES
+            ══════════════════════════════════════════════ */}
+            {activeTab === "database" && isAdmin && (
+              <div className="space-y-6 animate-fadeIn">
+                {/* ── Carte principale : lancer la sauvegarde ── */}
+                <section className="bg-white rounded-[2rem] p-8 border border-slate-100 shadow-xl space-y-8">
+                  <div className="flex items-center gap-4">
+                    <div className="size-12 rounded-2xl bg-slate-900 flex items-center justify-center text-white shadow-lg">
+                      <HardDrive size={24} />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-black text-slate-900 uppercase">
+                        Sauvegarde de la Base de Données
+                      </h2>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Export complet toutes collections · Format JSON ·
+                        Archive ZIP
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div className="bg-slate-50 rounded-2xl p-6 space-y-3">
+                    <p className="text-xs font-bold text-slate-600 leading-relaxed">
+                      La sauvegarde exporte{" "}
+                      <span className="text-slate-900 font-black">
+                        toutes les collections
+                      </span>{" "}
+                      de la base de données en fichiers{" "}
+                      <span className="text-slate-900 font-black">JSON</span>,
+                      compressés dans une archive{" "}
+                      <span className="text-slate-900 font-black">ZIP</span>{" "}
+                      nommée avec la date et l'heure exactes. Le fichier sera
+                      téléchargé directement dans votre dossier
+                      <span className="text-slate-900 font-black">
+                        {" "}
+                        Téléchargements
+                      </span>
+                      .
+                    </p>
+                    <div className="flex flex-wrap gap-3 pt-2">
+                      {[
+                        "Clients & BLs",
+                        "Transactions",
+                        "Versements",
+                        "Utilisateurs",
+                        "Factures",
+                        "Historiques",
+                        "Dépenses",
+                        "Caisse",
+                      ].map((tag) => (
+                        <span
+                          key={tag}
+                          className="px-3 py-1 bg-white border border-slate-200 rounded-xl text-[10px] font-black text-slate-500 uppercase"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Bouton principal */}
+                  <button
+                    onClick={handleDownloadBackup}
+                    disabled={isDownloading}
+                    className="w-full flex items-center justify-center gap-3 bg-slate-900 hover:bg-[#EF233C] text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-xl disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {isDownloading ? (
+                      <>
+                        <Loader2 className="animate-spin" size={20} />
+                        Génération en cours...
+                      </>
+                    ) : (
+                      <>
+                        <Download size={20} />
+                        Télécharger la Sauvegarde
+                      </>
+                    )}
+                  </button>
+                </section>
+
+                {/* ── Aperçu des collections ── */}
+                <section className="bg-white rounded-[2rem] p-8 border border-slate-100 shadow-xl space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="size-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600">
+                        <Database size={22} />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black text-slate-900 uppercase">
+                          Aperçu des Collections
+                        </h3>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          Contenu actuel de la base de données
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={fetchBackupInfo}
+                      disabled={isLoadingBackupInfo}
+                      className="p-3 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 transition-all"
+                      title="Rafraîchir"
+                    >
+                      <RefreshCw
+                        size={16}
+                        className={isLoadingBackupInfo ? "animate-spin" : ""}
+                      />
+                    </button>
+                  </div>
+
+                  {isLoadingBackupInfo ? (
+                    <div className="flex items-center justify-center py-12 gap-3 text-slate-400">
+                      <Loader2 className="animate-spin" size={20} />
+                      <span className="text-xs font-black uppercase tracking-widest">
+                        Analyse de la base...
+                      </span>
+                    </div>
+                  ) : backupInfo ? (
+                    <>
+                      {/* Stats globales */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-slate-900 rounded-2xl p-5 text-white">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                            Collections
+                          </p>
+                          <p className="text-3xl font-black">
+                            {backupInfo.totalCollections}
+                          </p>
+                        </div>
+                        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-5">
+                          <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">
+                            Total Documents
+                          </p>
+                          <p className="text-3xl font-black text-emerald-700">
+                            {backupInfo.totalDocuments.toLocaleString("fr-FR")}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Liste des collections */}
+                      <div className="space-y-2 max-h-[360px] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200 pr-1">
+                        {backupInfo.collections.map((col, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between px-5 py-3.5 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-white hover:shadow-sm transition-all group"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="size-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center group-hover:border-slate-300 transition-all">
+                                <FileJson
+                                  size={14}
+                                  className="text-slate-400"
+                                />
+                              </div>
+                              <span className="text-xs font-black text-slate-700 uppercase">
+                                {col.collection}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black text-slate-500">
+                                {col.documents.toLocaleString("fr-FR")}
+                              </span>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase">
+                                doc{col.documents > 1 ? "s" : ""}
+                              </span>
+                              {col.documents > 0 && (
+                                <CheckCircle2
+                                  size={14}
+                                  className="text-emerald-500"
+                                />
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest text-right">
+                        Dernière analyse :{" "}
+                        {new Date(backupInfo.generatedAt).toLocaleString(
+                          "fr-FR",
+                        )}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 gap-3 text-slate-300">
+                      <PackageOpen size={40} />
+                      <p className="text-xs font-black uppercase tracking-widest">
+                        Cliquez sur actualiser pour analyser la base
+                      </p>
+                    </div>
+                  )}
+                </section>
+              </div>
             )}
 
             {/* TAB PROFIL */}
@@ -621,7 +900,7 @@ const SettingsPage = () => {
         </form>
       </Modal>
 
-      {/* MODAL DE RÉINITIALISATION EXISTANT */}
+      {/* MODAL DE RÉINITIALISATION */}
       <Modal
         isOpen={showResetModal}
         onClose={() => !isResetting && setShowResetModal(false)}
@@ -712,7 +991,7 @@ const SettingsPage = () => {
 const TabButton = ({ active, onClick, label, icon }) => (
   <button
     onClick={onClick}
-    className={`pb-4 text-xs font-black uppercase tracking-widest transition-all relative flex items-center gap-2 ${
+    className={`pb-4 text-xs font-black uppercase tracking-widest transition-all relative flex items-center gap-2 whitespace-nowrap ${
       active ? "text-slate-900" : "text-slate-400 hover:text-slate-600"
     }`}
   >

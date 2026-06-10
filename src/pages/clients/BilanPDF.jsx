@@ -12,33 +12,57 @@ import {
    UTILITAIRES
 ───────────────────────────────────────────── */
 
-/**
- * Formate un nombre avec séparateurs de milliers (espace insécable)
- * ex: 1000000 → "1 000 000"
- */
 const fmt = (n) => {
   if (n === null || n === undefined || n === "-") return "-";
   const num = Number(n);
   if (isNaN(num)) return "-";
-  return num.toLocaleString("fr-FR"); // ex: 1 000 000
+  return num.toLocaleString("fr-FR").replace(/\u202F/g, "\u00A0");
 };
 
 /**
- * Nettoie la description :
- * - Supprime le préfixe "Facturation BL: XXXXX | Montant: XXXXXX"  → garde le reste
- * - Supprime aussi "Facturation BL: XXXXX |" sans montant
- * - Si la description ne contient que ça, on retourne la désignation nettoyée
+ * Extrait le numéro VERS-XXXX-XXXXXX depuis une description.
  */
-const cleanDescription = (raw = "") => {
-  // Supprime "Facturation BL: [ref] | Montant: [n]" et variantes
-  let cleaned = raw
-    .replace(/Facturation\s+BL\s*:\s*[^\|]+\|\s*Montant\s*:\s*[\d\s]+/gi, "")
-    .replace(/Facturation\s+BL\s*:\s*[^\|]+\|?/gi, "")
-    .replace(/\|\s*Montant\s*:\s*[\d\s]+/gi, "")
-    .trim();
+const extractReference = (description = "") => {
+  const match = description.match(/VERS-\d{4}-\d{6}/i);
+  return match ? match[0].toUpperCase() : null;
+};
 
-  // Si tout a été effacé, on retourne "Facturation" comme libellé minimal
-  return cleaned || "Facturation";
+/**
+ * Construit la désignation affichée dans la colonne PDF.
+ *
+ * Cas gérés (d'après les données réelles de la DB) :
+ *
+ *  DÉBIT - Facturation BL classique :
+ *    "Facturation BL: NGP3254550 | Montant: 160000"
+ *    → "Facturation BL: NGP3254550"   (supprime " | Montant: XXXXXX")
+ *
+ *  DÉBIT - Facture Extra :
+ *    "Facture extra (Frais avancés par agent) : FRET (BL: NGP3254550)"
+ *    → description complète conservée telle quelle
+ *
+ *  DÉBIT - Annulation / autre :
+ *    "Suppression Facture Extra : FRET"
+ *    → description complète conservée telle quelle
+ *
+ *  CRÉDIT - Versement :
+ *    "Versement reçu - Réf: VERS-2026-000132"
+ *    → description complète (la vraie desc s'affiche en sous-ligne via vraiDescription)
+ */
+const buildDesignation = (raw = "") => {
+  if (!raw) return "—";
+
+  // Facturation BL classique : "Facturation BL: XXXXX | Montant: NNNNNN"
+  // → on simplifie en gardant uniquement "Facturation BL: XXXXX"
+  const factClassique = raw.match(
+    /^Facturation\s+BL\s*:\s*(\S+)\s*\|\s*Montant\s*:/i,
+  );
+  if (factClassique) {
+    return `Facturation BL: ${factClassique[1]}`;
+  }
+
+  // Tous les autres cas : on retourne la description telle quelle
+  // (Facture extra, Versement, Suppression, Annulation, etc.)
+  return raw.trim();
 };
 
 /* ─────────────────────────────────────────────
@@ -98,7 +122,6 @@ const styles = StyleSheet.create({
   /* ── TABLE ── */
   table: { marginTop: 8 },
 
-  // En-tête du tableau
   tableHeader: {
     flexDirection: "row",
     backgroundColor: COLORS.DARK_BLUE,
@@ -114,7 +137,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
 
-  // Lignes du tableau
   tableRow: {
     flexDirection: "row",
     borderBottomWidth: 1,
@@ -125,29 +147,31 @@ const styles = StyleSheet.create({
   tableRowAlt: { backgroundColor: COLORS.ROW_ALT },
   tableRowReport: { backgroundColor: "#F0F4FF" },
 
-  // Colonnes — largeurs ajustées pour 7 colonnes
   colDate: { width: "10%" },
-  colDesc: { width: "26%" },
   colNbrCont: { width: "7%", textAlign: "center" },
   colNumCont: { width: "15%" },
   colMarch: { width: "18%" },
   colDebit: { width: "12%", textAlign: "right" },
   colCredit: { width: "12%", textAlign: "right" },
 
-  // Textes cellules
   cellText: { fontSize: 8, color: COLORS.DARK_BLUE },
-  cellTextBold: {
-    fontSize: 8,
-    fontFamily: "Helvetica-Bold",
-    color: COLORS.DARK_BLUE,
-  },
   cellDebit: { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#C0392B" },
   cellCredit: { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#27AE60" },
   cellMuted: { fontSize: 8, color: COLORS.SLATE_BLUE },
   cellReportBold: {
     fontSize: 8,
     fontFamily: "Helvetica-Bold",
-    color: "#2563EB",
+    color: "#D11306",
+  },
+
+  /* ── Wrapper désignation (empile description + sous-ligne versement) ── */
+  descWrapper: { flexDirection: "column", width: "26%" },
+  descMain: { fontSize: 8, color: COLORS.DARK_BLUE },
+  descSub: {
+    fontSize: 7,
+    color: COLORS.PRIMARY_RED,
+    fontFamily: "Helvetica-Bold",
+    marginTop: 1,
   },
 
   /* ── SUMMARY ── */
@@ -158,7 +182,7 @@ const styles = StyleSheet.create({
   },
   summaryBox: {
     width: "42%",
-    backgroundColor: COLORS.DARK_BLUE,
+    backgroundColor: COLORS.LIGHT_BG,
     padding: 10,
     color: COLORS.WHITE,
     borderRadius: 4,
@@ -168,11 +192,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 5,
   },
-  summaryLabel: { fontSize: 8, color: "#CBD5E1" },
+  summaryLabel: { fontSize: 8, color: COLORS.DARK_BLUE },
   summaryValue: {
     fontSize: 8,
     fontFamily: "Helvetica-Bold",
-    color: COLORS.WHITE,
+    color: COLORS.DARK_BLUE,
   },
   finalBalance: {
     borderTopWidth: 1,
@@ -183,9 +207,13 @@ const styles = StyleSheet.create({
   finalLabel: {
     fontSize: 9,
     fontFamily: "Helvetica-Bold",
-    color: COLORS.WHITE,
+    color: COLORS.DARK_BLUE,
   },
-  finalValue: { fontSize: 9, fontFamily: "Helvetica-Bold", color: "#FCD34D" },
+  finalValue: {
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+    color: COLORS.DARK_BLUE,
+  },
 
   /* ── FOOTER ── */
   footer: {
@@ -205,13 +233,21 @@ const styles = StyleSheet.create({
 /* ─────────────────────────────────────────────
    COMPOSANT PRINCIPAL
    Props :
-     data      — tableau de transactions filtrées
-     client    — objet client
-     period    — { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
-     bilanSummary — { initial, debit, credit, final }
-     blsMap    — Map<numBl, { numDeConteneur, nbrDeConteneur, contenance }>
+     data                — tableau de transactions filtrées
+     client              — objet client
+     period              — { start: "YYYY-MM-DD", end: "YYYY-MM-DD" }
+     bilanSummary        — { initial, debit, credit, final }
+     blsMap              — Map<numBl, { numDeConteneur, nbrDeConteneur, contenance }>
+     versementsDescMap   — Map<"VERS-XXXX-XXXXXX", "description réelle saisie en caisse">
 ───────────────────────────────────────────── */
-const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
+const BilanPDF = ({
+  data = [],
+  client,
+  period,
+  bilanSummary,
+  blsMap = {},
+  versementsDescMap = {},
+}) => (
   <Document>
     <Page size="A4" style={styles.page}>
       {/* ── HEADER ── */}
@@ -241,7 +277,7 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
         {/* En-tête */}
         <View style={styles.tableHeader}>
           <Text style={[styles.thText, styles.colDate]}>Date</Text>
-          <Text style={[styles.thText, styles.colDesc]}>Désignation</Text>
+          <Text style={[styles.thText, { width: "26%" }]}>Désignation</Text>
           <Text style={[styles.thText, styles.colNbrCont]}>Nb Cont</Text>
           <Text style={[styles.thText, styles.colNumCont]}>N° Conteneur</Text>
           <Text style={[styles.thText, styles.colMarch]}>Marchandise</Text>
@@ -252,7 +288,7 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
         {/* Ligne Report solde antérieur */}
         <View style={[styles.tableRow, styles.tableRowReport]}>
           <Text style={[styles.cellMuted, styles.colDate]}>---</Text>
-          <Text style={[styles.cellReportBold, styles.colDesc]}>
+          <Text style={[styles.cellReportBold, { width: "26%" }]}>
             REPORT SOLDE ANTÉRIEUR
           </Text>
           <Text style={[styles.cellMuted, styles.colNbrCont]}>—</Text>
@@ -268,23 +304,29 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
         {data.map((t, i) => {
           const isCredit = t.typeOperation?.toLowerCase().includes("credit");
 
-          // Récupération des infos BL depuis blsMap
-          // On cherche le numBl dans la description (format "... BL: XXXXX |...")
-          // OU directement via t.numBl si le champ existe
+          // ── Infos BL depuis blsMap ──
+          // Regex large qui capture aussi "(BL: XXXXX)" des factures extra
           let blInfo = null;
           if (t.numBl && blsMap[t.numBl]) {
             blInfo = blsMap[t.numBl];
           } else {
-            // Extraction du numBl depuis la description
-            const match = t.description?.match(/BL\s*:\s*([^\s|,]+)/i);
-            if (match && blsMap[match[1]]) {
-              blInfo = blsMap[match[1]];
+            const blMatch = t.description?.match(/BL\s*:\s*([^\s|,\)]+)/i);
+            if (blMatch) {
+              const numBl = blMatch[1].trim();
+              if (blsMap[numBl]) blInfo = blsMap[numBl];
             }
           }
 
           const nbrCont = blInfo?.nbrDeConteneur ?? "—";
           const numCont = blInfo?.numDeConteneur ?? "—";
           const marchand = blInfo?.contenance ?? "—";
+
+          // ── Désignation principale ──
+          const designation = buildDesignation(t.description);
+
+          // ── Vraie description du versement (depuis versementsDescMap) ──
+          const ref = isCredit ? extractReference(t.description) : null;
+          const vraiDescription = ref ? versementsDescMap[ref] : null;
 
           return (
             <View
@@ -294,9 +336,15 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
               <Text style={[styles.cellText, styles.colDate]}>
                 {new Date(t.date).toLocaleDateString("fr-FR")}
               </Text>
-              <Text style={[styles.cellText, styles.colDesc]}>
-                {cleanDescription(t.description)}
-              </Text>
+
+              {/* ── Désignation : description complète + sous-ligne versement ── */}
+              <View style={styles.descWrapper}>
+                <Text style={styles.descMain}>{designation}</Text>
+                {vraiDescription ? (
+                  <Text style={styles.descSub}>↳ {vraiDescription}</Text>
+                ) : null}
+              </View>
+
               <Text style={[styles.cellText, styles.colNbrCont]}>
                 {nbrCont}
               </Text>
@@ -304,6 +352,7 @@ const BilanPDF = ({ data = [], client, period, bilanSummary, blsMap = {} }) => (
                 {numCont}
               </Text>
               <Text style={[styles.cellText, styles.colMarch]}>{marchand}</Text>
+
               <Text
                 style={[
                   isCredit ? styles.cellMuted : styles.cellDebit,
