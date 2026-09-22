@@ -5,6 +5,7 @@ import {
   Wallet,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Loader2,
   RefreshCcw,
   Download,
@@ -15,6 +16,20 @@ import { toast } from "react-hot-toast";
 import * as XLSX from "xlsx";
 import API from "../../utils/axiosInstance";
 import { API_PATHS } from "../../utils/apiPaths";
+
+// ── Seuil (en jours) au-delà duquel un remboursement "À Rembourser" est
+// considéré en retard, calculé depuis la colonne DATE (item.datePaiement) ──
+const SEUIL_JOURS_ALERTE = 25;
+
+// ── Nombre de jours écoulés entre une date et aujourd'hui ──
+const getJoursEcoules = (dateStr) => {
+  if (!dateStr) return 0;
+  const date = new Date(dateStr);
+  date.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor((today - date) / (1000 * 60 * 60 * 24));
+};
 
 const Liquidations = () => {
   const [activeTab, setActiveTab] = useState("credit");
@@ -28,6 +43,10 @@ const Liquidations = () => {
   // --- ÉTATS FILTRES DATE ---
   const [dateDebut, setDateDebut] = useState("");
   const [dateFin, setDateFin] = useState("");
+
+  // --- FILTRE RETARD (onglet "À Rembourser" uniquement) ---
+  // "tous" | "retard" | "aTemps"
+  const [retardFilter, setRetardFilter] = useState("tous");
 
   // --- DATE DE REMBOURSEMENT (modal) ---
   // Initialisée à aujourd'hui, modifiable par l'utilisateur
@@ -58,6 +77,7 @@ const Liquidations = () => {
     setDateDebut("");
     setDateFin("");
     setSearchTerm("");
+    setRetardFilter("tous");
   }, [activeTab]);
 
   const stats = useMemo(() => {
@@ -120,15 +140,66 @@ const Liquidations = () => {
       const matchDebut = debut && itemDate ? itemDate >= debut : true;
       const matchFin = fin && itemDate ? itemDate <= fin : true;
 
-      return matchSearch && matchDebut && matchFin;
+      // ── Filtre En retard / Non en retard (onglet "À Rembourser" uniquement) ──
+      let matchRetard = true;
+      if (activeTab === "credit" && retardFilter !== "tous") {
+        const enRetard =
+          getJoursEcoules(item.datePaiement) > SEUIL_JOURS_ALERTE;
+        matchRetard = retardFilter === "retard" ? enRetard : !enRetard;
+      }
+
+      return matchSearch && matchDebut && matchFin && matchRetard;
     });
-  }, [data, searchTerm, dateDebut, dateFin]);
+  }, [data, searchTerm, dateDebut, dateFin, activeTab, retardFilter]);
 
   const hasDateFilter = dateDebut || dateFin;
   const resetDateFilter = () => {
     setDateDebut("");
     setDateFin("");
   };
+
+  // ── Somme totale des montants affichés (tient compte de la recherche ET
+  // du filtre de dates) — s'actualise automatiquement à chaque changement ──
+  const filteredTotal = useMemo(
+    () =>
+      filteredData.reduce(
+        (sum, item) => sum + (parseFloat(item.montant) || 0),
+        0,
+      ),
+    [filteredData],
+  );
+
+  // ── Liquidations "À Rembourser" en retard : plus de 25 jours depuis
+  // la date affichée dans la colonne DATE ──
+  const overdueCount = useMemo(() => {
+    if (activeTab !== "credit") return 0;
+    return filteredData.filter(
+      (item) => getJoursEcoules(item.datePaiement) > SEUIL_JOURS_ALERTE,
+    ).length;
+  }, [filteredData, activeTab]);
+
+  // ── Compteurs pour le sélecteur Tous / En retard / Non en retard ──
+  // Calculés sur la base "recherche + dates" (sans le filtre retard lui-même)
+  // afin que chaque bouton affiche le bon total indépendamment du choix actif.
+  const retardCounts = useMemo(() => {
+    if (activeTab !== "credit") return { tous: 0, retard: 0, aTemps: 0 };
+    const base = data.filter((item) => {
+      const matchSearch =
+        item.numBl?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.numLiquidation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.nomClient?.toLowerCase().includes(searchTerm.toLowerCase());
+      const itemDate = item.datePaiement ? new Date(item.datePaiement) : null;
+      const debut = dateDebut ? new Date(dateDebut) : null;
+      const fin = dateFin ? new Date(dateFin + "T23:59:59") : null;
+      const matchDebut = debut && itemDate ? itemDate >= debut : true;
+      const matchFin = fin && itemDate ? itemDate <= fin : true;
+      return matchSearch && matchDebut && matchFin;
+    });
+    const retard = base.filter(
+      (item) => getJoursEcoules(item.datePaiement) > SEUIL_JOURS_ALERTE,
+    ).length;
+    return { tous: base.length, retard, aTemps: base.length - retard };
+  }, [data, searchTerm, dateDebut, dateFin, activeTab]);
 
   // --- EXPORT EXCEL ---
   const exportToExcel = () => {
@@ -268,6 +339,25 @@ const Liquidations = () => {
         )}
       </div>
 
+      {/* ── ALERTE : liquidations en retard (> 25 jours) ── */}
+      {activeTab === "credit" && overdueCount > 0 && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-2xl px-6 py-4 animate-fadeIn">
+          <div className="size-10 bg-red-500 text-white rounded-xl flex items-center justify-center flex-shrink-0">
+            <AlertTriangle size={18} />
+          </div>
+          <div>
+            <p className="text-xs font-black text-red-700 uppercase tracking-widest">
+              {overdueCount} remboursement{overdueCount > 1 ? "s" : ""} en
+              retard
+            </p>
+            <p className="text-[10px] font-bold text-red-500 uppercase tracking-widest">
+              Plus de {SEUIL_JOURS_ALERTE} jours écoulés depuis la date de
+              liquidation
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* TABLEAU PRINCIPAL */}
       <div className="bg-white p-6 rounded-[2rem] border border-slate-50 shadow-sm space-y-5">
         {/* LIGNE 1 : Onglets + Recherche + Export */}
@@ -345,6 +435,63 @@ const Liquidations = () => {
               <X size={11} /> Réinitialiser
             </button>
           )}
+
+          {/* ── Sélecteur Tous / En retard / Non en retard (onglet "À Rembourser") ── */}
+          {activeTab === "credit" && (
+            <div className="flex items-center gap-1 bg-slate-50 border border-slate-100 rounded-xl p-1">
+              {[
+                { id: "tous", label: "Tous", count: retardCounts.tous },
+                {
+                  id: "retard",
+                  label: "En retard",
+                  count: retardCounts.retard,
+                },
+                {
+                  id: "aTemps",
+                  label: "Non en retard",
+                  count: retardCounts.aTemps,
+                },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  onClick={() => setRetardFilter(opt.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${
+                    retardFilter === opt.id
+                      ? opt.id === "retard"
+                        ? "bg-red-600 text-white shadow-sm"
+                        : "bg-slate-900 text-white shadow-sm"
+                      : "text-slate-400 hover:text-slate-600"
+                  }`}
+                >
+                  {opt.id === "retard" && <AlertTriangle size={10} />}
+                  {opt.label}
+                  <span
+                    className={`px-1.5 py-0.5 rounded-md text-[8px] ${
+                      retardFilter === opt.id
+                        ? "bg-white/20"
+                        : "bg-slate-200 text-slate-500"
+                    }`}
+                  >
+                    {opt.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* ── Total de la période sélectionnée ── */}
+          {hasDateFilter && (
+            <div className="flex items-center gap-2 bg-slate-900 text-white rounded-xl px-4 py-2">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                Total période
+              </span>
+              <span className="text-xs font-black">
+                {filteredTotal.toLocaleString("fr-FR")}{" "}
+                <span className="text-[9px] font-bold text-slate-400">MRU</span>
+              </span>
+            </div>
+          )}
+
           <span className="ml-auto text-[9px] font-black text-slate-400 uppercase tracking-widest">
             {filteredData.length} résultat{filteredData.length > 1 ? "s" : ""}
             {hasDateFilter && " · filtré"}
@@ -387,76 +534,96 @@ const Liquidations = () => {
                     </td>
                   </tr>
                 ) : (
-                  filteredData.map((item, idx) => (
-                    <tr
-                      key={idx}
-                      className="hover:bg-slate-50/50 transition-colors group"
-                    >
-                      <td className="px-6 py-4">
-                        <div className="text-[11px] font-bold text-slate-900">
-                          {new Date(item.datePaiement).toLocaleDateString(
-                            "fr-FR",
+                  filteredData.map((item, idx) => {
+                    const joursEcoules = getJoursEcoules(item.datePaiement);
+                    const isEnRetard =
+                      activeTab === "credit" &&
+                      joursEcoules > SEUIL_JOURS_ALERTE;
+
+                    return (
+                      <tr
+                        key={idx}
+                        className={`hover:bg-slate-50/50 transition-colors group ${
+                          isEnRetard ? "bg-red-50/60" : ""
+                        }`}
+                      >
+                        <td className="px-6 py-4">
+                          <div className="text-[11px] font-bold text-slate-900">
+                            {new Date(item.datePaiement).toLocaleDateString(
+                              "fr-FR",
+                            )}
+                          </div>
+                          <div className="text-[9px] text-slate-400 font-medium">
+                            {new Date(item.datePaiement).toLocaleTimeString(
+                              "fr-FR",
+                            )}
+                          </div>
+                          {isEnRetard && (
+                            <div
+                              className="flex items-center gap-1 mt-1.5 px-2 py-0.5 bg-red-100 text-red-600 rounded-md w-fit"
+                              title={`${joursEcoules} jours écoulés depuis la liquidation`}
+                            >
+                              <AlertTriangle size={10} />
+                              <span className="text-[8px] font-black uppercase tracking-tighter">
+                                Retard {joursEcoules}j
+                              </span>
+                            </div>
                           )}
-                        </div>
-                        <div className="text-[9px] text-slate-400 font-medium">
-                          {new Date(item.datePaiement).toLocaleTimeString(
-                            "fr-FR",
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-[11px] font-black text-slate-900 uppercase">
-                          {item.numLiquidation}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-[11px] font-black text-slate-900 uppercase">
-                          {item.numBl}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-[11px] font-black text-slate-900 uppercase">
-                          {item.nomClient}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 font-black text-[11px]">
-                        {parseFloat(item.montant).toLocaleString()}{" "}
-                        <span className="text-[9px] text-slate-400">MRU</span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`px-3 py-1 rounded-full text-[9px] font-black uppercase border ${
-                            item.typePaiement === "Credit Douane"
-                              ? "bg-amber-50 text-amber-600 border-amber-100"
-                              : "bg-blue-50 text-blue-600 border-blue-100"
-                          }`}
-                        >
-                          {item.typePaiement}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        {activeTab === "credit" ? (
-                          <button
-                            onClick={() => openModal(item)}
-                            className="px-4 py-2 bg-red-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg shadow-red-100 hover:scale-105 transition-transform"
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-[11px] font-black text-slate-900 uppercase">
+                            {item.numLiquidation}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-[11px] font-black text-slate-900 uppercase">
+                            {item.numBl}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-[11px] font-black text-slate-900 uppercase">
+                            {item.nomClient}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 font-black text-[11px]">
+                          {parseFloat(item.montant).toLocaleString()}{" "}
+                          <span className="text-[9px] text-slate-400">MRU</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span
+                            className={`px-3 py-1 rounded-full text-[9px] font-black uppercase border ${
+                              item.typePaiement === "Credit Douane"
+                                ? "bg-amber-50 text-amber-600 border-amber-100"
+                                : "bg-blue-50 text-blue-600 border-blue-100"
+                            }`}
                           >
-                            Régler
-                          </button>
-                        ) : item.typePaiement === "Credit Douane" ? (
-                          <button
-                            onClick={() => openModal(item)}
-                            className="px-4 py-2 bg-slate-100 text-slate-600 hover:text-red-600 rounded-xl text-[9px] font-black uppercase transition-colors"
-                          >
-                            Annuler
-                          </button>
-                        ) : (
-                          <span className="text-[9px] text-slate-300 font-bold uppercase italic">
-                            Finalisé
+                            {item.typePaiement}
                           </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          {activeTab === "credit" ? (
+                            <button
+                              onClick={() => openModal(item)}
+                              className="px-4 py-2 bg-red-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg shadow-red-100 hover:scale-105 transition-transform"
+                            >
+                              Régler
+                            </button>
+                          ) : item.typePaiement === "Credit Douane" ? (
+                            <button
+                              onClick={() => openModal(item)}
+                              className="px-4 py-2 bg-slate-100 text-slate-600 hover:text-red-600 rounded-xl text-[9px] font-black uppercase transition-colors"
+                            >
+                              Annuler
+                            </button>
+                          ) : (
+                            <span className="text-[9px] text-slate-300 font-bold uppercase italic">
+                              Finalisé
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

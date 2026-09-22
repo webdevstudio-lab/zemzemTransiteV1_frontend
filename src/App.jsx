@@ -80,6 +80,8 @@ const App = () => {
               <Route element={<ProtectedRoutes allowedRoles={["admin"]} />}>
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/douane" element={<Douane />} />
+                {/* Dépenses : réservé à l'administrateur, retiré du groupe superviseur */}
+                <Route path="/depenses" element={<Depenses />} />
               </Route>
 
               {/* --- ACCÈS : ADMIN & SUPERVISEUR --- */}
@@ -97,7 +99,6 @@ const App = () => {
                 {/* Gestion Financière */}
                 <Route path="/caisse" element={<Caisse />} />
                 <Route path="/liquidations" element={<Liquidations />} />
-                <Route path="/depenses" element={<Depenses />} />
 
                 {/* Documents & Suivi */}
                 <Route path="/facture" element={<UnderConstruction />} />

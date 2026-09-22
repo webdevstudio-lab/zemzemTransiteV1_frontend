@@ -60,7 +60,7 @@ const DashboardLayout = ({ children, activeMenu }) => {
         setIsInitialized(initStatus);
         if (initStatus) {
           setCompanyName(
-            response.data.data.company?.nomEntreprise || "Zemzem Group"
+            response.data.data.company?.nomEntreprise || "Zemzem Group",
           );
         }
       } catch (error) {
@@ -116,7 +116,7 @@ const DashboardLayout = ({ children, activeMenu }) => {
       id: "depenses",
       label: "Dépenses",
       icon: Wallet,
-      roles: ["admin", "superviseur"],
+      roles: ["admin"],
     },
     {
       id: "liquidations",
@@ -146,7 +146,7 @@ const DashboardLayout = ({ children, activeMenu }) => {
   ];
 
   const filteredMenu = menuItems.filter((item) =>
-    item.roles.includes(user?.role)
+    item.roles.includes(user?.role),
   );
 
   return (

@@ -31,11 +31,17 @@ import API from "../../utils/axiosInstance";
 import { API_PATHS } from "../../utils/apiPaths";
 import { PDFDownloadLink } from "@react-pdf/renderer";
 import BilanPDF from "./BilanPDF";
+import { useAuth } from "../../context/AuthContext";
 
 const ClientDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const cleanId = id.split("_")[0];
+
+  // ── Les indicateurs financiers sensibles (Brut Client, Chiffre d'affaires,
+  // Bénéfice) ne doivent être visibles que par l'administrateur.
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   const [client, setClient] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -491,68 +497,75 @@ const ClientDetails = () => {
                       {clientStats.totalConteneurs}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-4 py-2 rounded-xl">
-                    <TrendingUp size={13} className="text-amber-500" />
-                    <div>
-                      <p className="text-[8px] font-black uppercase text-amber-500 leading-none">
-                        Brut Client
-                      </p>
-                      <p className="text-xs font-black text-amber-700">
-                        {clientStats.brutClient.toLocaleString("fr-FR")}{" "}
-                        <span className="text-[9px] font-bold">MRU</span>
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-4 py-2 rounded-xl">
-                    <Wallet size={13} className="text-blue-500" />
-                    <div>
-                      <p className="text-[8px] font-black uppercase text-blue-500 leading-none">
-                        Chiffre d'affaires
-                      </p>
-                      <p className="text-xs font-black text-blue-700">
-                        {clientStats.chiffreAffaires.toLocaleString("fr-FR")}{" "}
-                        <span className="text-[9px] font-bold">MRU</span>
-                      </p>
-                    </div>
-                  </div>
-                  <div
-                    className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${
-                      clientStats.benefice >= 0
-                        ? "bg-emerald-50 border-emerald-200"
-                        : "bg-red-50 border-red-200"
-                    }`}
-                  >
-                    <BadgeDollarSign
-                      size={13}
-                      className={
-                        clientStats.benefice >= 0
-                          ? "text-emerald-500"
-                          : "text-red-500"
-                      }
-                    />
-                    <div>
-                      <p
-                        className={`text-[8px] font-black uppercase leading-none ${
+                  {/* ── Indicateurs financiers : ADMIN UNIQUEMENT ── */}
+                  {isAdmin && (
+                    <>
+                      <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-4 py-2 rounded-xl">
+                        <TrendingUp size={13} className="text-amber-500" />
+                        <div>
+                          <p className="text-[8px] font-black uppercase text-amber-500 leading-none">
+                            Brut Client
+                          </p>
+                          <p className="text-xs font-black text-amber-700">
+                            {clientStats.brutClient.toLocaleString("fr-FR")}{" "}
+                            <span className="text-[9px] font-bold">MRU</span>
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-4 py-2 rounded-xl">
+                        <Wallet size={13} className="text-blue-500" />
+                        <div>
+                          <p className="text-[8px] font-black uppercase text-blue-500 leading-none">
+                            Chiffre d'affaires
+                          </p>
+                          <p className="text-xs font-black text-blue-700">
+                            {clientStats.chiffreAffaires.toLocaleString(
+                              "fr-FR",
+                            )}{" "}
+                            <span className="text-[9px] font-bold">MRU</span>
+                          </p>
+                        </div>
+                      </div>
+                      <div
+                        className={`flex items-center gap-2 px-4 py-2 rounded-xl border ${
                           clientStats.benefice >= 0
-                            ? "text-emerald-500"
-                            : "text-red-500"
+                            ? "bg-emerald-50 border-emerald-200"
+                            : "bg-red-50 border-red-200"
                         }`}
                       >
-                        Bénéfice
-                      </p>
-                      <p
-                        className={`text-xs font-black ${
-                          clientStats.benefice >= 0
-                            ? "text-emerald-700"
-                            : "text-red-700"
-                        }`}
-                      >
-                        {clientStats.benefice >= 0 ? "+" : ""}
-                        {clientStats.benefice.toLocaleString("fr-FR")}{" "}
-                        <span className="text-[9px] font-bold">MRU</span>
-                      </p>
-                    </div>
-                  </div>
+                        <BadgeDollarSign
+                          size={13}
+                          className={
+                            clientStats.benefice >= 0
+                              ? "text-emerald-500"
+                              : "text-red-500"
+                          }
+                        />
+                        <div>
+                          <p
+                            className={`text-[8px] font-black uppercase leading-none ${
+                              clientStats.benefice >= 0
+                                ? "text-emerald-500"
+                                : "text-red-500"
+                            }`}
+                          >
+                            Bénéfice
+                          </p>
+                          <p
+                            className={`text-xs font-black ${
+                              clientStats.benefice >= 0
+                                ? "text-emerald-700"
+                                : "text-red-700"
+                            }`}
+                          >
+                            {clientStats.benefice >= 0 ? "+" : ""}
+                            {clientStats.benefice.toLocaleString("fr-FR")}{" "}
+                            <span className="text-[9px] font-bold">MRU</span>
+                          </p>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -638,9 +651,21 @@ const ClientDetails = () => {
                   />
                 </div>
                 <button
-                  onClick={() =>
-                    exportToExcel(filteredBLs, `Historique_BL_${client?.nom}`)
-                  }
+                  onClick={() => {
+                    // ── Export Excel "Historique BL" : uniquement les colonnes demandées ──
+                    const rowsToExport = filteredBLs.map((bl) => ({
+                      numBl: bl.numBl ?? "—",
+                      numDeConteneur: bl.numDeConteneur ?? "—",
+                      dateCreation: bl.dateCreation
+                        ? new Date(bl.dateCreation).toLocaleDateString()
+                        : "—",
+                      nbrDeConteneur: bl.nbrDeConteneur ?? "—",
+                      contenance: bl.contenance ?? "—",
+                      typeDeConteneur: bl.typeDeConteneur ?? "—",
+                      numDeclaration: bl.numDeclaration ?? "—",
+                    }));
+                    exportToExcel(rowsToExport, `Historique_BL_${client?.nom}`);
+                  }}
                   className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-700 transition-colors"
                 >
                   <Download size={14} /> Excel
